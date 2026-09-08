@@ -31,6 +31,7 @@
 [ext_resource type="Texture2D" uid="uid://cxsevv3wmkp27" path="res://data/graphics/gui/button/button_focus.png" id="16"]
 [ext_resource type="Texture2D" uid="uid://di2g4farnr2ej" path="res://data/graphics/gui/notification-leaf.png" id="18_h6yt3"]
 [ext_resource type="FontFile" uid="uid://shxh5secawoq" path="res://data/graphics/fonts/alagard-16.ttf" id="18_v607h"]
+[ext_resource type="Texture2D" uid="uid://dvalh5n0jqur2" path="res://data/graphics/gui/panelsides.png" id="22_4trm7"]
 [ext_resource type="FontFile" uid="uid://bxtecswl0imti" path="res://data/graphics/fonts/romulus-16.ttf" id="22_e68kl"]
 [ext_resource type="Texture2D" uid="uid://cm5pw0y8j157l" path="res://data/graphics/gui/window/window_bg.png" id="22_ovqsu"]
 [ext_resource type="Texture2D" uid="uid://ckqp851k875au" path="res://data/graphics/gui/split_bar.png" id="27_sv4ge"]
@@ -292,6 +293,13 @@ texture_margin_bottom = 12.0
 [sub_resource type="StyleBoxTexture" id="StyleBoxTexture_c2qqs"]
 texture = ExtResource("15_a7lxq")
 texture_margin_left = 64.0
+texture_margin_top = 12.0
+texture_margin_right = 8.0
+texture_margin_bottom = 12.0
+
+[sub_resource type="StyleBoxTexture" id="StyleBoxTexture_eypvk"]
+texture = ExtResource("22_4trm7")
+texture_margin_left = 8.0
 texture_margin_top = 12.0
 texture_margin_right = 8.0
 texture_margin_bottom = 12.0
@@ -570,6 +578,8 @@ PanelSideLeft/base_type = &"PanelContainer"
 PanelSideLeft/styles/panel = SubResource("StyleBoxTexture_psur8")
 PanelSideRight/base_type = &"PanelContainer"
 PanelSideRight/styles/panel = SubResource("StyleBoxTexture_c2qqs")
+PanelSides/base_type = &"PanelContainer"
+PanelSides/styles/panel = SubResource("StyleBoxTexture_eypvk")
 PearlBox/base_type = &"CheckBox"
 PearlBox/colors/font_color = Color(0.933333, 0.847059, 0.631373, 1)
 PearlBox/colors/font_disabled_color = Color(0.933333, 0.847059, 0.631373, 1)
