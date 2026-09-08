@@ -50,6 +50,7 @@ extends ServiceBase
 
 # Highlight
 var highlight : UIHighlight						= UIHighlight.new()
+var shortcutTiles : Array[CellTile]				= []
 
 # State transition
 var progressTimer : Timer						= null

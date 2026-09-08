@@ -168,7 +168,7 @@ func RemoveSelection():
 		selection = null
 
 static func RefreshShortcuts(baseCell : BaseCell, newCount : int = -1):
-	if baseCell == null:
+	if baseCell == null or Launcher.GUI == null:
 		return
 
 	if newCount < 0 and Launcher.Player:
@@ -185,9 +185,8 @@ static func RefreshShortcuts(baseCell : BaseCell, newCount : int = -1):
 							newCount = item.count
 							break
 
-	var tiles : Array[Node] = Launcher.GUI.get_tree().get_nodes_in_group("CellTile")
-	for shortcutTile in tiles:
-		if shortcutTile and shortcutTile.is_visible() and shortcutTile.draggable and shortcutTile.cell == baseCell:
+	for shortcutTile in Launcher.GUI.shortcutTiles:
+		if shortcutTile.is_visible() and shortcutTile.cell == baseCell:
 			shortcutTile.count = newCount
 			shortcutTile.equipped = CellCommons.IsEquipped(baseCell)
 			shortcutTile.UpdateCountLabel()
@@ -256,6 +255,14 @@ func _get_equipment_slot() -> ActorCommons.Slot:
 	return ActorCommons.Slot.NONE
 
 # Default
+func _enter_tree():
+	if draggable and Launcher.GUI:
+		Launcher.GUI.shortcutTiles.append(self)
+
+func _exit_tree():
+	if draggable and Launcher.GUI:
+		Launcher.GUI.shortcutTiles.erase(self)
+
 func _ready():
 	defaultMaterial = icon.material if icon else null
 	UpdateData()
