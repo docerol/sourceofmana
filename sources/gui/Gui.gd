@@ -271,6 +271,7 @@ func _notification(notif):
 			Launcher.Action.Enable(false)
 		Node.NOTIFICATION_DRAG_END:
 			Launcher.Action.Enable(true)
+			DeviceManager.ResetCursor()
 		NOTIFICATION_APPLICATION_PIP_MODE_ENTERED:
 			EnterPip()
 		NOTIFICATION_APPLICATION_PIP_MODE_EXITED:

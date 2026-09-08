@@ -90,6 +90,11 @@ func SetToolTip():
 	bbcode += GetTooltipWeight()
 	set_tooltip_text(bbcode)
 
+func ClampTooltipWidth(label : RichTextLabel):
+	if label.get_content_width() > UICommons.TooltipMaxWidth:
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.custom_minimum_size.x = UICommons.TooltipMaxWidth
+
 func _make_custom_tooltip(for_text : String) -> Object:
 	if for_text.is_empty():
 		return null
@@ -99,6 +104,7 @@ func _make_custom_tooltip(for_text : String) -> Object:
 	label.autowrap_mode = TextServer.AUTOWRAP_OFF
 	label.add_theme_color_override("default_color", UICommons.TextColor)
 	label.text = for_text
+	label.tree_entered.connect(ClampTooltipWidth.bind(label))
 	return label
 
 func UpdateCountLabel():
@@ -162,17 +168,22 @@ func RemoveSelection():
 		selection = null
 
 static func RefreshShortcuts(baseCell : BaseCell, newCount : int = -1):
-	if baseCell == null or not Launcher.Player or not Launcher.Player.inventory:
+	if baseCell == null:
 		return
 
-	if baseCell.type != CellCommons.Type.ITEM:
-		newCount = 1
-	elif newCount < 0:
-		newCount = 0
-		for item in Launcher.Player.inventory.items:
-			if item and CellCommons.IsSameItem(baseCell, item):
-				newCount = item.count
-				break
+	if newCount < 0 and Launcher.Player:
+		match baseCell.type:
+			CellCommons.Type.SKILL:
+				var skillCell : SkillCell = baseCell as SkillCell
+				newCount = 1 if skillCell and Launcher.Player.progress and Launcher.Player.progress.HasSkill(skillCell) else 0
+			CellCommons.Type.EMOTE:
+				newCount = 1
+			CellCommons.Type.ITEM:
+				if Launcher.Player.inventory:
+					for item in Launcher.Player.inventory.items:
+						if item and CellCommons.IsSameItem(baseCell, item):
+							newCount = item.count
+							break
 
 	var tiles : Array[Node] = Launcher.GUI.get_tree().get_nodes_in_group("CellTile")
 	for shortcutTile in tiles:
@@ -200,7 +211,6 @@ func Hover(isHovering : bool):
 func Used(cooldown : float = 0.0):
 	cooldownTimer = cooldown
 	set_process(true)
-
 
 func ClearCooldown():
 	cooldownTimer = -INF

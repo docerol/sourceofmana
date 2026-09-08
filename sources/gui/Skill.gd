@@ -17,7 +17,7 @@ func RefreshSkills():
 		var skill : SkillCell = DB.GetSkill(skillID)
 		if not skill is SkillCell:
 			continue
-		CellTile.RefreshShortcuts(skill, 1)
+		CellTile.RefreshShortcuts(skill)
 		match skill.category:
 			SkillCell.Category.SPELL:
 				var tile : CellTile = spellGrid.GetTile(spellIdx)

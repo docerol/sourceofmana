@@ -448,7 +448,6 @@ metadata/_edit_layout_mode = 1
 [node name="Inventory" parent="Windows/Floating" unique_id=1715311206 instance=ExtResource("35_j05ha")]
 visible = false
 show_behind_parent = false
-custom_minimum_size = Vector2(200, 100)
 layout_mode = 0
 offset_left = 645.0
 offset_top = 153.0

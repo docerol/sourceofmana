@@ -6,7 +6,7 @@
 [ext_resource type="PackedScene" uid="uid://da8nt01w5gjsp" path="res://presets/gui/TitleBar.tscn" id="tb_scene"]
 
 [node name="Skill" type="PanelContainer" unique_id=753831765]
-custom_minimum_size = Vector2(200, 80)
+custom_minimum_size = Vector2(210, 120)
 offset_left = 68.0
 offset_top = 25.0
 offset_right = 196.0

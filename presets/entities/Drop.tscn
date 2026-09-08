@@ -1,0 +1,13 @@
+[gd_scene format=3 uid="uid://dmqwrrkpm56ba"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_drop"]
+radius = 12.0
+
+[node name="Drop" type="Sprite2D" unique_id=400898863]
+
+[node name="ClickArea" type="Area2D" parent="." unique_id=182811538]
+collision_layer = 2
+collision_mask = 0
+
+[node name="ClickShape" type="CollisionShape2D" parent="ClickArea" unique_id=624553405]
+shape = SubResource("CircleShape2D_drop")

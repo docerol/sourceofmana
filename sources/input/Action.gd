@@ -101,9 +101,14 @@ func _unhandled_input(event):
 	if event.is_action("gp_click_to") and supportMouse:
 		if IsEnabled() and FSM.IsGameState() and clickTimer and Launcher.Player and IsActionPressed("gp_click_to"):
 			if Entities.hovered:
+				Launcher.Map.ClearDelayedPickupCallback()
 				Entities.InteractHovered(Entities.hovered)
+			elif Launcher.Map.hoveredDrop != -1:
+				Entities.ClearDelayedHoveredCallback()
+				Launcher.Map.PickupHoveredDrop(Launcher.Map.hoveredDrop)
 			elif clickTimer.is_stopped():
 				Entities.ClearDelayedHoveredCallback()
+				Launcher.Map.ClearDelayedPickupCallback()
 				MoveTo(Launcher.Camera.camera.get_global_mouse_position())
 	elif event is InputEventScreenTouch:
 		incrementalPressedTouchCount = incrementalPressedTouchCount + 1 if event.pressed else 0
@@ -124,6 +129,7 @@ func _physics_process(_deltaTime : float):
 		var move : Vector2 = GetMove()
 		if move != Vector2.ZERO:
 			Entities.ClearDelayedHoveredCallback()
+			Launcher.Map.ClearDelayedPickupCallback()
 			if clickTimer.get_time_left() > 0:
 				clickTimer.stop()
 			if previousMove != move:

@@ -2,6 +2,7 @@ extends Node
 class_name Instantiate
 
 const EntityScene : PackedScene = preload("res://presets/entities/Entity.tscn")
+const DropScene : PackedScene = preload("res://presets/entities/Drop.tscn")
 
 # Entity
 static func CreateEntity(actorType : ActorCommons.Type, data : EntityData, nick : String = "", isManaged : bool = false) -> Entity:
@@ -44,11 +45,12 @@ static func CreateAgent(spawn : SpawnObject, data : EntityData, nick : String = 
 
 # Drop
 static func CreateDrop(cell : BaseCell, pos : Vector2) -> Sprite2D:
-	var node : Sprite2D = Sprite2D.new()
+	var node : Sprite2D = DropScene.instantiate()
 	node.texture = cell.icon
 	node.position = pos
 	if cell is ItemCell and cell.shader != null:
 		node.material = cell.shader
+
 	return node
 
 # Map

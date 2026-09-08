@@ -33,7 +33,7 @@ gradient = SubResource("Gradient_green")
 
 [node name="Stat" type="PanelContainer" unique_id=769858201]
 show_behind_parent = true
-custom_minimum_size = Vector2(180, 100)
+custom_minimum_size = Vector2(480, 320)
 offset_right = 400.0
 offset_bottom = 419.0
 size_flags_horizontal = 0

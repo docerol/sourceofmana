@@ -12,8 +12,8 @@ enum EdgeOrientation { NONE, RIGHT, BOTTOM_RIGHT, BOTTOM, BOTTOM_LEFT, LEFT, TOP
 @export var saveOverlayState : bool	= false
 @export var allowAutomaticResize : bool = false
 @export var maxSize : Vector2		= Vector2(-1, -1)
-const edgeSize : int				= 5
-const cornerSize : int				= 15
+const edgeSize : int				= 6
+const cornerSize : int				= 10
 var clickPosition : Vector2			= Vector2.INF
 var isResizing : bool				= false
 var selectedEdge : EdgeOrientation	= EdgeOrientation.NONE
@@ -22,7 +22,7 @@ var selectedEdge : EdgeOrientation	= EdgeOrientation.NONE
 func ClampFloatingWindow(globalPos : Vector2, moveLimit : Vector2):
 	if selectedEdge == EdgeOrientation.BOTTOM_LEFT || selectedEdge == EdgeOrientation.LEFT || selectedEdge == EdgeOrientation.TOP_LEFT:
 		moveLimit.x -= custom_minimum_size.x
-	elif selectedEdge == EdgeOrientation.TOP_LEFT || selectedEdge == EdgeOrientation.TOP || selectedEdge == EdgeOrientation.TOP_RIGHT:
+	if selectedEdge == EdgeOrientation.TOP_LEFT || selectedEdge == EdgeOrientation.TOP || selectedEdge == EdgeOrientation.TOP_RIGHT:
 		moveLimit.y -= custom_minimum_size.y
 	return Vector2( clampf(globalPos.x, 0.0, moveLimit.x), clampf(globalPos.y, 0.0, moveLimit.y))
 
@@ -30,8 +30,12 @@ func ClampToMargin(marginSize : Vector2):
 	position = ClampFloatingWindow(position, marginSize - size)
 
 func ResizeWindow(pos : Vector2, globalPos : Vector2):
-	var rectSize = size
-	var rectPos = position
+	var previousSize : Vector2 = size
+	var previousPosition : Vector2 = position
+	var rectSize = previousSize
+	var rectPos = previousPosition
+	var isLeftEdge : bool = selectedEdge in [EdgeOrientation.LEFT, EdgeOrientation.TOP_LEFT, EdgeOrientation.BOTTOM_LEFT]
+	var isTopEdge : bool = selectedEdge in [EdgeOrientation.TOP, EdgeOrientation.TOP_LEFT, EdgeOrientation.TOP_RIGHT]
 
 	match selectedEdge:
 		EdgeOrientation.RIGHT:
@@ -42,40 +46,42 @@ func ResizeWindow(pos : Vector2, globalPos : Vector2):
 			rectSize.y = pos.y
 		EdgeOrientation.BOTTOM_LEFT:
 			rectSize.x -= globalPos.x - rectPos.x
-			rectPos.x = globalPos.x
 			rectSize.y = pos.y
 		EdgeOrientation.LEFT:
 			rectSize.x -= globalPos.x - rectPos.x
-			rectPos.x = globalPos.x
 		EdgeOrientation.TOP_LEFT:
 			rectSize.x -= globalPos.x - rectPos.x
-			rectPos.x = globalPos.x
 			rectSize.y -= globalPos.y - rectPos.y
-			rectPos.y = globalPos.y
 		EdgeOrientation.TOP:
 			rectSize.y -= globalPos.y - rectPos.y
-			rectPos.y = globalPos.y
 		EdgeOrientation.TOP_RIGHT:
 			rectSize.y -= globalPos.y - rectPos.y
-			rectPos.y = globalPos.y
 			rectSize.x = pos.x
 
 	if maxSize.x != -1:
-		rectSize.x = clamp(rectSize.x, custom_minimum_size.x, maxSize.x)
+		rectSize.x = min(rectSize.x, maxSize.x)
 	if maxSize.y != -1:
-		rectSize.y = clamp(rectSize.y, custom_minimum_size.y, maxSize.y)
+		rectSize.y = min(rectSize.y, maxSize.y)
+
+	size = rectSize
+	var appliedSize : Vector2 = size
+
+	if isLeftEdge:
+		rectPos.x = previousPosition.x + previousSize.x - appliedSize.x
+	if isTopEdge:
+		rectPos.y = previousPosition.y + previousSize.y - appliedSize.y
 
 	if rectPos.x < 0:
 		rectPos.x = 0
 	if rectPos.y < 0:
 		rectPos.y = 0
 
-	size = rectSize
 	position = rectPos
 
-func GetEdgeOrientation(pos : Vector2):
+func GetEdgeOrientation(pos : Vector2) -> EdgeOrientation:
 	var cornersArray = []
 	var edgesArray = []
+	var edge : EdgeOrientation = EdgeOrientation.NONE
 
 	if pos.y >= size.y - cornerSize:
 		cornersArray.append(EdgeOrientation.BOTTOM)
@@ -99,21 +105,45 @@ func GetEdgeOrientation(pos : Vector2):
 		match cornersArray[1]:
 			EdgeOrientation.LEFT:
 				match cornersArray[0]:
-					EdgeOrientation.BOTTOM:	selectedEdge = EdgeOrientation.BOTTOM_LEFT
-					EdgeOrientation.TOP:	selectedEdge = EdgeOrientation.TOP_LEFT
+					EdgeOrientation.BOTTOM:	edge = EdgeOrientation.BOTTOM_LEFT
+					EdgeOrientation.TOP:	edge = EdgeOrientation.TOP_LEFT
 			EdgeOrientation.RIGHT:
 				match cornersArray[0]:
-					EdgeOrientation.BOTTOM:	selectedEdge = EdgeOrientation.BOTTOM_RIGHT
-					EdgeOrientation.TOP:	selectedEdge = EdgeOrientation.TOP_RIGHT
+					EdgeOrientation.BOTTOM:	edge = EdgeOrientation.BOTTOM_RIGHT
+					EdgeOrientation.TOP:	edge = EdgeOrientation.TOP_RIGHT
 	elif edgesArray.size() >= 1:
-		selectedEdge = edgesArray[0]
+		edge = edgesArray[0]
 
-	isResizing = selectedEdge != EdgeOrientation.NONE
+	return edge
+
+func GetCursorForEdge(edge : EdgeOrientation) -> DeviceManager.CursorType:
+	match edge:
+		EdgeOrientation.RIGHT, EdgeOrientation.LEFT:
+			return DeviceManager.CursorType.RESIZE_HORIZONTAL
+		EdgeOrientation.TOP, EdgeOrientation.BOTTOM:
+			return DeviceManager.CursorType.RESIZE_VERTICAL
+		EdgeOrientation.TOP_LEFT, EdgeOrientation.BOTTOM_RIGHT:
+			return DeviceManager.CursorType.RESIZE_DIAGONAL_BACK
+		EdgeOrientation.TOP_RIGHT, EdgeOrientation.BOTTOM_LEFT:
+			return DeviceManager.CursorType.RESIZE_DIAGONAL_FORWARD
+		_:
+			return DeviceManager.CursorType.DEFAULT
+
+func RefreshResizeCursor(edge : EdgeOrientation):
+	if edge == EdgeOrientation.NONE:
+		DeviceManager.ResetCursor()
+	else:
+		DeviceManager.SetCursor(GetCursorForEdge(edge))
+
+func _notification(what : int):
+	if what == NOTIFICATION_MOUSE_EXIT and clickPosition == Vector2.INF:
+		DeviceManager.ResetCursor()
 
 func ResetWindowModifier():
 	clickPosition	= Vector2.INF
 	isResizing		= false
 	selectedEdge 	= EdgeOrientation.NONE
+	DeviceManager.ResetCursor()
 
 func ToggleControl():
 	EnableControl(!is_visible())
@@ -134,14 +164,19 @@ func CanBlockActions():
 	return blockActions
 
 #
+func IsWithinResizeMargin(pos : Vector2) -> bool:
+	return pos >= -Vector2.ONE * cornerSize && pos <= size + Vector2.ONE * cornerSize
+
 func OnGuiInput(event : InputEvent):
 	if event is InputEventMouseButton:
-		var isInPanel = event.position >= Vector2.ZERO && event.position <= size
+		var isInPanel = IsWithinResizeMargin(event.position)
 		if isInPanel:
 			if event.pressed:
 				clickPosition = event.position
-				GetEdgeOrientation(event.position)
+				selectedEdge = GetEdgeOrientation(event.position)
+				isResizing = selectedEdge != EdgeOrientation.NONE
 				SetFloatingWindowToTop()
+				RefreshResizeCursor(selectedEdge)
 			else:
 				ResetWindowModifier()
 		else:
@@ -150,12 +185,15 @@ func OnGuiInput(event : InputEvent):
 	if event is InputEventMouseMotion:
 		if clickPosition != Vector2.INF:
 			UpdateWindow(event.position)
+		else:
+			var isInPanel = IsWithinResizeMargin(event.position)
+			RefreshResizeCursor(GetEdgeOrientation(event.position) if isInPanel else EdgeOrientation.NONE)
 
 func UpdateWindow(eventPosition : Vector2 = Vector2.ZERO):
 	var floatingWindowSize : Vector2 = Launcher.GUI.windows.get_size()
 
 	if isResizing:
-		ResizeWindow(ClampFloatingWindow(eventPosition, floatingWindowSize), eventPosition + position)
+		ResizeWindow(ClampFloatingWindow(eventPosition, floatingWindowSize), ClampFloatingWindow(eventPosition + position, floatingWindowSize))
 	else:
 		if clickPosition != Vector2.INF:
 			position += eventPosition - clickPosition

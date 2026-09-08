@@ -20,6 +20,7 @@ const PickUpNotificationDelaySec : float			= 5.0
 const DisplayActionShortDelaySec : float			= 5.0
 const DisplayActionLongDelaySec : float				= 10.0
 const DialogueTextSpeed : float						= 0.02
+const TooltipMaxWidth : float						= 360.0
 
 #
 enum ButtonBox

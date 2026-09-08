@@ -10,7 +10,7 @@ func RefreshEmotes():
 	for emoteName in DB.EmotesDB:
 		var emote : BaseCell = DB.EmotesDB[emoteName]
 		if emote is BaseCell:
-			CellTile.RefreshShortcuts(emote, 1)
+			CellTile.RefreshShortcuts(emote)
 			if tile:
 				tile.AssignData(emote)
 				tileIdx += 1

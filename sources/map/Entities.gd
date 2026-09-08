@@ -190,13 +190,13 @@ static func InteractHovered(targetHovered : Entity):
 				moveToEntity = true
 				walkToDistance = ActorCommons.TargetWalkToDistance
 		ActorCommons.Type.MONSTER:
-			var hoveredInRange : bool = ActorCommons.IsAlive(targetHovered) and ActorCommons.IsActorNear(Launcher.Player, targetHovered, Launcher.Player.stat.current.attackRange)
+			walkToDistance = (Launcher.Player.stat.current.attackRange / 2.0) as int
+			var hoveredInRange : bool = ActorCommons.IsAlive(targetHovered) and ActorCommons.IsActorNear(Launcher.Player, targetHovered, walkToDistance)
 			if hoveredInRange:
 				Entities.SetTarget(targetHovered)
 				Entities.JustInteract()
 			else:
 				moveToEntity = true
-				walkToDistance = Launcher.Player.stat.current.attackRange
 
 	if moveToEntity:
 		var playerPos : Vector2 = Launcher.Player.get_position()

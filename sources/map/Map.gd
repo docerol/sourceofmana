@@ -14,6 +14,7 @@ var currentMapID : int					= DB.UnknownHash
 var currentMapNode : Node2D				= null
 var currentFringe : TileMapLayer		= null
 var drops : Dictionary[int, Sprite2D]	= {}
+var hoveredDrop : int					= -1
 var entityCache : Dictionary[int, EntityCacheEntry] = {}
 var pendingWarp : bool					= true
 
@@ -46,6 +47,7 @@ func UnloadMapNode():
 		currentMapNode = null
 		currentFringe = null
 		drops.clear()
+		ClearHoveredDrop()
 		pendingWarp = true
 		entityCache.clear()
 		Entities.Clear()
@@ -208,12 +210,43 @@ func AddDrop(dropID : int, cell : BaseCell, pos : Vector2):
 		if dropNode:
 			AddChild(dropNode)
 			drops[dropID] = dropNode
+			var clickArea : Area2D = dropNode.get_node("ClickArea")
+			clickArea.mouse_entered.connect(SetHoveredDrop.bind(dropID))
+			clickArea.mouse_exited.connect(ClearHoveredDrop.bind(dropID))
 
 func RemoveDrop(dropID : int):
 	var drop : Sprite2D = drops.get(dropID)
 	if drop:
 		RemoveChild(drop)
 		drops.erase(dropID)
+		ClearHoveredDrop(dropID)
+
+func SetHoveredDrop(dropID : int):
+	hoveredDrop = dropID
+	DeviceManager.SetCursor(DeviceManager.CursorType.PICKUP)
+
+func ClearHoveredDrop(dropID : int = -1):
+	if dropID == -1 or hoveredDrop == dropID:
+		hoveredDrop = -1
+		DeviceManager.ResetCursor()
+
+func ClearDelayedPickupCallback():
+	Callback.RemoveMatchingCallback(self, PlayerHalted, PickupHoveredDrop)
+
+func PickupHoveredDrop(dropID : int):
+	ClearDelayedPickupCallback()
+	if not Launcher.Player:
+		return
+
+	var drop : Sprite2D = drops.get(dropID)
+	if not drop:
+		return
+
+	if Launcher.Player.position.distance_squared_to(drop.position) < ActorCommons.PickupSquaredDistance:
+		Network.PickupDrop(dropID)
+	else:
+		Launcher.Action.MoveTo(drop.position)
+		PlayerHalted.connect(PickupHoveredDrop.bind(dropID), ConnectFlags.CONNECT_ONE_SHOT)
 
 func PickupNearestDrop():
 	var nearestID : int = -1

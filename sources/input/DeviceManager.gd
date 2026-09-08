@@ -92,30 +92,57 @@ static var actionNames : Dictionary[String, String] = {
 	"gp_zoom_reset": "Reset Zoom",
 }
 
-#
+# Cursor
 enum CursorType {
 	DEFAULT = 0,
 	INTERACT,
 	ATTACK,
+	PICKUP,
+	DRAG,
+	RESIZE_HORIZONTAL,
+	RESIZE_VERTICAL,
+	RESIZE_DIAGONAL_BACK,
+	RESIZE_DIAGONAL_FORWARD,
 }
 
 const CursorTextures : Array[Texture2D] = [
-	preload("res://data/graphics/gui/misc/mouse.png"),
-	preload("res://data/graphics/gui/misc/mouse-interact.png"),
-	preload("res://data/graphics/gui/misc/mouse-attack.png"),
+	preload("res://data/graphics/gui/misc/mouse.png"),							# DEFAULT
+	preload("res://data/graphics/gui/misc/mouse-interact.png"),					# INTERACT
+	preload("res://data/graphics/gui/misc/mouse-attack.png"),					# ATTACK
+	preload("res://data/graphics/gui/misc/mouse-pickup.png"),					# PICKUP
+	preload("res://data/graphics/gui/misc/mouse-drag.png"),						# DRAG
+	preload("res://data/graphics/gui/misc/mouse-resize-horizontal.png"),		# RESIZE_HORIZONTAL
+	preload("res://data/graphics/gui/misc/mouse-resize-vertical.png"),			# RESIZE_VERTICAL
+	preload("res://data/graphics/gui/misc/mouse-resize-diagonal-back.png"),		# RESIZE_DIAGONAL_BACK
+	preload("res://data/graphics/gui/misc/mouse-resize-diagonal-forward.png"),	# RESIZE_DIAGONAL_FORWARD
 ]
 
+const CursorHotspots : Array[Vector2] = [
+	Vector2.ZERO,		# DEFAULT
+	Vector2.ZERO,		# INTERACT
+	Vector2.ZERO,		# ATTACK
+	Vector2(16, 16),	# PICKUP
+	Vector2(16, 16),	# DRAG
+	Vector2(16, 16),	# RESIZE_HORIZONTAL
+	Vector2(16, 16),	# RESIZE_VERTICAL
+	Vector2(16, 16),	# RESIZE_DIAGONAL_BACK
+	Vector2(16, 16),	# RESIZE_DIAGONAL_FORWARD
+]
+
+#
 static func Init():
-	if DeviceManager.HasDeviceSupport():
-		Input.set_custom_mouse_cursor(CursorTextures[CursorType.DEFAULT])
+	if HasDeviceSupport():
+		SetCursor(CursorType.DEFAULT)
+		Input.set_custom_mouse_cursor(CursorTextures[CursorType.DRAG], Input.CURSOR_DRAG, CursorHotspots[CursorType.DRAG])
+		Input.set_custom_mouse_cursor(CursorTextures[CursorType.DRAG], Input.CURSOR_CAN_DROP, CursorHotspots[CursorType.DRAG])
 
 static func SetCursor(cursorType : CursorType):
 	if HasDeviceSupport():
-		Input.set_custom_mouse_cursor(CursorTextures[cursorType])
+		Input.set_custom_mouse_cursor(CursorTextures[cursorType], Input.CURSOR_ARROW, CursorHotspots[cursorType])
 
 static func ResetCursor():
 	SetCursor(CursorType.DEFAULT)
-
+#
 static func GetActionInfo(action : String) -> Array:
 	var defaultValue : String = ""
 	var defaultDeviceType : DeviceType = DeviceType.KEYBOARD
