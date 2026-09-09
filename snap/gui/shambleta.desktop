@@ -1,7 +1,7 @@
 [Desktop Entry]
-Name=Source of Mana
-Comment=Source of Mana is a classic 2D MMORPG inspired by the golden era of pixel art RPGs.
-Exec=source-of-mana
+Name=Shambleta
+Comment=Shambleta is a classic 2D MMORPG inspired by the golden era of pixel art RPGs.
+Exec=shambleta
 Icon=${SNAP}/meta/gui/logo_seed.svg
 Terminal=false
 Type=Application
