@@ -73,6 +73,16 @@ func _run_tests():
 			suites.SuiteLeaderboard(sql, f3char)
 			suites.SuiteFormationSlots(sql, f3char, sql.GetAccountIDForCharacter(f3char))
 
+		# SOM-IDLE: F4 suites (trade, chests, VIP checkout)
+		var f4a : int = suites.CreateFixture(sql, "idle_f4_account_a", "IdleF4TradeA")
+		var f4b : int = suites.CreateFixture(sql, "idle_f4_account_b", "IdleF4TradeB")
+		if suites.Check(f4a != 0 and f4b != 0, "F4 fixtures created (%d, %d)" % [f4a, f4b]):
+			var acctA : int = sql.GetAccountIDForCharacter(f4a)
+			var acctB : int = sql.GetAccountIDForCharacter(f4b)
+			suites.SuiteTrade(sql, f4a, f4b, acctA, acctB)
+			suites.SuiteChests(sql, f4a, acctA)
+			suites.SuiteVIPCheckout(sql, f4a, acctA)
+
 		# §7.4 deterministic live farm sim (zone 1) — after the DB suites so the
 		# fixture character is already leveled by the settle
 		await suites.SuiteIdlePolicySim(suites.lastCharID)

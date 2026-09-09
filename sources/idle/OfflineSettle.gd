@@ -170,7 +170,8 @@ static func _ApplyFormula(sql : SQLService, report : SettleReport):
 static func _Apply(sql : SQLService, report : SettleReport) -> bool:
 	var sqlNode : SQLService = sql
 	var applied : bool = false
-	if not sqlNode.Transaction(func() -> bool:
+	# Transaction returns TRUE on commit (old `if not` relied on nested-tx corruption, F3/F4 fix)
+	if sqlNode.Transaction(func() -> bool:
 		# Idempotency guard: re-read the anchor INSIDE the transaction
 		var fresh : Dictionary = sqlNode.GetCharacter(report.charID)
 		if fresh.is_empty() or int(fresh.get("last_settled_at", 0)) >= report.lastSettledAt:

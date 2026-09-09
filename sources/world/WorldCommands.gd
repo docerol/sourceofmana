@@ -49,7 +49,12 @@ func RegisterCommands():
 	# SOM-IDLE: F3
 	CommandManager.Register("zones", CommandZones, ActorCommons.Permission.NONE, "zones" )
 	CommandManager.Register("top", CommandTop, ActorCommons.Permission.NONE, "top" )
-	CommandManager.Register("vip", CommandVIP, ActorCommons.Permission.NONE, "vip" )
+	CommandManager.Register("vip", CommandVIP, ActorCommons.Permission.NONE, "vip | vip buy <1|2>" )
+	# SOM-IDLE: F4
+	CommandManager.Register("gems", CommandGems, ActorCommons.Permission.NONE, "gems" )
+	CommandManager.Register("chests", CommandChests, ActorCommons.Permission.NONE, "chests" )
+	CommandManager.Register("openchest", CommandOpenChest, ActorCommons.Permission.NONE, "openchest <chest_id>" )
+	CommandManager.Register("trade", CommandTrade, ActorCommons.Permission.NONE, "trade <player> <item_id> [count=1]" )
 
 static func UnregisterCommands():
 	CommandManager.Unregister("spawn")
@@ -99,6 +104,11 @@ static func UnregisterCommands():
 	CommandManager.Unregister("zones")
 	CommandManager.Unregister("top")
 	CommandManager.Unregister("vip")
+	# SOM-IDLE: F4
+	CommandManager.Unregister("chests")
+	CommandManager.Unregister("openchest")
+	CommandManager.Unregister("trade")
+	CommandManager.Unregister("gems")
 
 # SOM-IDLE: F3 — zone map listing with power gates ("/zones")
 func CommandZones(caller : PlayerAgent) -> bool:
@@ -124,12 +134,100 @@ func CommandTop(caller : PlayerAgent) -> bool:
 	Network.GetLeaderboard(caller.peerID)
 	return true
 
-# SOM-IDLE: F3 — VIP status ("/vip")
-func CommandVIP(caller : PlayerAgent) -> bool:
+# SOM-IDLE: F3 — VIP status ("/vip"); F4 extends it with the gems checkout
+func CommandVIP(caller : PlayerAgent, arg : String = "") -> bool:
 	if not caller:
 		return false
+
+	# "/vip buy 1|2" — purchase VIP with gems (EconomyService enforces the cost)
+	var buyParts : PackedStringArray = arg.strip_edges().to_lower().split(" ", false)
+	if buyParts.size() == 2 and buyParts[0] == "buy":
+		var tier : int = buyParts[1].to_int()
+		var accountID : int = Peers.GetAccount(caller.peerID)
+		if accountID == NetworkCommons.PeerUnknownID:
+			Network.CommandFeedback("No account bound", caller.peerID)
+			return false
+		if Launcher.Economy.PurchaseVIP(accountID, tier):
+			var until : int = Launcher.SQL.GetVIPUntil(accountID)
+			Network.CommandFeedback("VIP%d active until %s (idle faucet x%.1f)" % [tier, Time.get_datetime_string_from_unix_time(until), OfflineSettle.VIPModFactor], caller.peerID)
+			return true
+		Network.CommandFeedback("Purchase failed: not enough gems (%d/%d)" % [Launcher.Economy.GetGems(accountID), 440 if tier == 1 else 880], caller.peerID)
+		return false
+
 	Network.GetVIPState(caller.peerID)
 	return true
+
+# SOM-IDLE: F4 — gems wallet ("/gems")
+func CommandGems(caller : PlayerAgent) -> bool:
+	if not caller:
+		return false
+	var accountID : int = Peers.GetAccount(caller.peerID)
+	if accountID == NetworkCommons.PeerUnknownID:
+		Network.CommandFeedback("No account bound", caller.peerID)
+		return false
+	Network.CommandFeedback("Gems: %d" % Launcher.Economy.GetGems(accountID), caller.peerID)
+	return true
+
+# SOM-IDLE: F4 — chest listing and opening ("/chests", "/openchest <id>")
+func CommandChests(caller : PlayerAgent) -> bool:
+	if not caller:
+		return false
+	var chests : Array[Dictionary] = Launcher.SQL.GetClosedChests(caller.GetCharacterID())
+	if chests.is_empty():
+		Network.CommandFeedback("No closed chests (earn them by offline settles)", caller.peerID)
+		return true
+	var list : PackedStringArray = PackedStringArray()
+	list.append("Closed chests: %s" % ", ".join(chests.map(func(c : Dictionary) -> String: return str(c["id"]))))
+	Network.CommandFeedback("\n".join(list), caller.peerID)
+	return true
+
+func CommandOpenChest(caller : PlayerAgent, chestArg : String = "") -> bool:
+	if not caller:
+		return false
+	var chestID : int = chestArg.strip_edges().to_int()
+	if chestID <= 0:
+		Network.CommandFeedback("Usage: /openchest <chest_id> (see /chests)", caller.peerID)
+		return false
+	var result : Dictionary = Launcher.Economy.OpenChest(caller.GetCharacterID(), chestID)
+	if result.is_empty():
+		Network.CommandFeedback("Could not open chest %d (not yours or already opened)" % chestID, caller.peerID)
+		return false
+	var itemName : String = "?"
+	var cell : ItemCell = DB.ItemsDB.get(int(result["item_id"]), null)
+	if cell != null:
+		itemName = cell._name
+	var pityTag : String = " [PITY!]" if bool(result["pity"]) else ""
+	Network.CommandFeedback("Chest %d opened: %s x%d%s" % [chestID, itemName, int(result["count"]), pityTag], caller.peerID)
+	return true
+
+# SOM-IDLE: F4 — direct item trade, atomic with a fee burn ("/trade <player> <item_id> [count]")
+func CommandTrade(caller : PlayerAgent, arg : String = "") -> bool:
+	if not caller:
+		return false
+	var parts : PackedStringArray = arg.strip_edges().split(" ", false)
+	if parts.size() < 2:
+		Network.CommandFeedback("Usage: /trade <player> <item_id> [count=1] (fee: %d gems, paid by you)" % Launcher.Economy.TradeFeeGems, caller.peerID)
+		return false
+	var targetNick : String = parts[0]
+	var itemID : int = parts[1].to_int()
+	var count : int = parts[2].to_int() if parts.size() > 2 else 1
+	if itemID <= 0 or count <= 0:
+		Network.CommandFeedback("Invalid item or count", caller.peerID)
+		return false
+
+	# Only characters of OTHER accounts can be trade targets (no self-trade)
+	if Launcher.SQL.HasCharacter(targetNick):
+		var targetCharID : int = Launcher.SQL.GetCharacterIDByName(targetNick)
+		if targetCharID == caller.GetCharacterID():
+			Network.CommandFeedback("You cannot trade with yourself", caller.peerID)
+			return false
+		if Launcher.Economy.ExecuteTrade(caller.GetCharacterID(), targetCharID, [{"item_id" = itemID, "count" = count}], []):
+			Network.CommandFeedback("Traded %dx item %d to %s (fee %d gems burned)" % [count, itemID, targetNick, Launcher.Economy.TradeFeeGems], caller.peerID)
+			return true
+		Network.CommandFeedback("Trade failed: check your items and gem balance", caller.peerID)
+		return false
+	Network.CommandFeedback("Player '%s' not found" % targetNick, caller.peerID)
+	return false
 
 # SOM-IDLE: F2 — start/stop an idle farming session ("/farm <zone>" / "/farm stop")
 func CommandFarm(caller : PlayerAgent, zoneArg : String = "") -> bool:

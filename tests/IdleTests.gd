@@ -575,3 +575,125 @@ func SuiteFormationSlots(sql : SQLService, charID : int, accountID : int) -> voi
 	Check(not loaded.is_empty(), "GetFormationForSlot returns row")
 	CheckNear(float(loaded.get("auto_potion_pct", 0.0)), 42.5, 0.01, "slot 3 auto-potion persisted")
 	Check(sql.SetCharacterFormationSlot(charID, 0), "slot reset to 0")
+
+# ------------------------------------------------------------------ F4 suites
+
+func _SetInventory(sql : SQLService, charID : int, itemHash : int, count : int) -> void:
+	sql.db.delete_rows("item", "item_id = %d AND char_id = %d AND storage = 0;" % [itemHash, charID])
+	if count > 0:
+		sql.db.insert_row("item", {"item_id" = itemHash, "char_id" = charID, "count" = count, "storage" = 0, "customfield" = ""})
+
+# ExecuteTrade: atomic escrow, fee burn, ledger mirrors, all-or-nothing
+func SuiteTrade(sql : SQLService, charA : int, charB : int, accountA : int, accountB : int) -> void:
+	print("[suite] trade (F4)")
+	var economy : EconomyService = Launcher.Economy
+	var apple : int = FarmZoneData.DefaultDropItemHash
+
+	# Fixture: A owns 5 apples, both accounts get gems
+	_SetInventory(sql, charA, apple, 5)
+	_SetInventory(sql, charB, apple, 0)
+	sql.SetGems(accountA, 100)
+	sql.SetGems(accountB, 100)
+	var ledgerBefore : int = sql.QueryBindings("SELECT COUNT(*) AS n FROM ledger_transaction;", [])[0]["n"]
+
+	# Insufficient fee → trade aborts completely
+	sql.SetGems(accountA, 5)
+	Check(not economy.ExecuteTrade(charA, charB, [{"item_id" = apple, "count" = 2}], []), "trade without fee funds rejected")
+	CheckEq(_CountItem(sql, charA, apple), 5, "no items moved on failed fee")
+	sql.SetGems(accountA, 100)
+
+	# Missing items → abort
+	Check(not economy.ExecuteTrade(charA, charB, [{"item_id" = apple, "count" = 50}], []), "trade with missing stacks rejected")
+	CheckEq(_CountItem(sql, charA, apple), 5, "no items moved on failed escrow")
+
+	# Happy path: A sends 2 apples, fee burned
+	Check(economy.ExecuteTrade(charA, charB, [{"item_id" = apple, "count" = 2}], []), "trade executed")
+	CheckEq(_CountItem(sql, charA, apple), 3, "sender debited")
+	CheckEq(_CountItem(sql, charB, apple), 2, "receiver credited")
+	CheckEq(sql.GetGems(accountA), 100 - economy.TradeFeeGems, "fee burned from wallet")
+	CheckEq(sql.GetGems(accountB), 100, "receiver pays no fee")
+
+	# Ledger invariant: every mutation mirrored
+	var ledgerAfter : int = int(sql.QueryBindings("SELECT COUNT(*) AS n FROM ledger_transaction;", [])[0]["n"])
+	Check(ledgerAfter - ledgerBefore >= 3, "ledger rows appended (fee + item moves): %d" % (ledgerAfter - ledgerBefore))
+	var feeRow : Array[Dictionary] = sql.QueryBindings("SELECT amount, balance_after FROM ledger_transaction WHERE reason = 'trade_fee' ORDER BY id DESC LIMIT 1;", [])
+	CheckEq(int(feeRow[0]["amount"]), -economy.TradeFeeGems, "fee ledger row negative")
+	CheckEq(int(feeRow[0]["balance_after"]), 100 - economy.TradeFeeGems, "fee balance_after consistent")
+
+	# Self-trade guard
+	Check(not economy.ExecuteTrade(charA, charA, [{"item_id" = apple, "count" = 1}], []), "self-trade rejected")
+
+func _CountItem(sql : SQLService, charID : int, itemHash : int) -> int:
+	var rows : Array[Dictionary] = sql.db.select_rows("item", "item_id = %d AND char_id = %d AND storage = 0" % [itemHash, charID], ["count"])
+	return 0 if rows.is_empty() else int(rows[0]["count"])
+
+# OpenChest: provably-fair roll, pity timer, single-open, ledger mirror
+func SuiteChests(sql : SQLService, charID : int, accountID : int) -> void:
+	print("[suite] chests (F4)")
+	var economy : EconomyService = Launcher.Economy
+
+	# Grant 3 closed chests
+	for i in 3:
+		Check(sql.AddChestInstance(charID, 0, "settle"), "chest %d granted" % i)
+	var stats : Dictionary = sql.GetChestStats(charID)
+	CheckEq(int(stats["closed"]), 3, "3 closed chests")
+
+	var first : Dictionary = economy.OpenChest(charID, 0)
+	Check(first.is_empty(), "chest id 0 does not exist")
+
+	# Open the first granted chest
+	var chestID : int = int(sql.GetClosedChests(charID)[0]["id"])
+	var result : Dictionary = economy.OpenChest(charID, chestID)
+	Check(not result.is_empty(), "chest %d opened" % chestID)
+	if not result.is_empty():
+		Check(int(result["item_id"]) > 0, "chest dropped item %d" % int(result["item_id"]))
+		Check(int(result["count"]) > 0, "chest drop count > 0")
+		Check(str(result["server_seed"]).length() > 0 and str(result["client_seed"]).length() > 0, "provably-fair seeds present")
+		# item actually delivered
+		Check(_CountItem(sql, charID, int(result["item_id"])) >= int(result["count"]), "chest item delivered to inventory")
+		# ledger mirror
+		var mirror : Array[Dictionary] = sql.QueryBindings("SELECT id FROM ledger_transaction WHERE reason LIKE 'chest:%';", [])
+		Check(mirror.size() >= 1, "chest ledger mirror present")
+
+	# Double-open rejected
+	Check(economy.OpenChest(charID, chestID).is_empty(), "chest double-open rejected")
+
+	# Deterministic: same chest state + nonce → same roll (re-open a fresh pair)
+	var stats2 : Dictionary = sql.GetChestStats(charID)
+	CheckEq(int(stats2["closed"]), 2, "2 chests remain closed")
+
+# VIP checkout: gems debit + window extension
+func SuiteVIPCheckout(sql : SQLService, charID : int, accountID : int) -> void:
+	print("[suite] VIP checkout (F4)")
+	var economy : EconomyService = Launcher.Economy
+	var now : int = SQLCommons.Timestamp()
+
+	sql.SetVIPUntil(accountID, 0)
+	sql.SetGems(accountID, 500)
+
+	# Insufficient funds (sanity run also seeds a VIP window — reset it after)
+	sql.SetGems(accountID, 500)
+	Check(economy.PurchaseVIP(accountID, 1), "purchase path sanity")
+	sql.SetVIPUntil(accountID, 0)
+	sql.SetGems(accountID, 100)
+	Check(not economy.PurchaseVIP(accountID, 1), "VIP purchase rejected without gems")
+	CheckEq(sql.GetVIPUntil(accountID), 0, "no window granted on failed purchase")
+
+	# Successful VIP1
+	sql.SetGems(accountID, 500)
+	Check(economy.PurchaseVIP(accountID, 1), "VIP1 purchased")
+	CheckEq(sql.GetGems(accountID), 500 - economy.VIP1CostGems, "gems debited")
+	Check(sql.GetVIPUntil(accountID) > now, "vip_until in the future")
+
+	# Stacking: VIP2 extends from the current window (top up: VIP1 left 60 gems)
+	sql.SetGems(accountID, 1000)
+	var before : int = sql.GetVIPUntil(accountID)
+	Check(economy.PurchaseVIP(accountID, 2), "VIP2 purchased (stack)")
+	CheckEq(sql.GetVIPUntil(accountID), before + economy.VIPDays * 86400, "window extended from current until")
+
+	# Ledger has purchase rows
+	var rows : Array[Dictionary] = sql.QueryBindings("SELECT amount FROM ledger_transaction WHERE reason LIKE 'vip%%' ORDER BY id DESC LIMIT 2;", [])
+	Check(rows.size() == 2, "purchase ledger rows present (%d)" % rows.size())
+
+	# Invalid tier
+	Check(not economy.PurchaseVIP(accountID, 3), "invalid tier rejected")

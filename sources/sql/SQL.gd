@@ -135,6 +135,11 @@ func RefreshCharacter(player : PlayerAgent) -> bool:
 func HasCharacter(nickname : String) -> bool:
 	return not QueryBindings("SELECT char_id FROM character WHERE nickname = ?;", [nickname]).is_empty()
 
+# SOM-IDLE: F4 — trade target lookup
+func GetCharacterIDByName(nickname : String) -> int:
+	var rows : Array[Dictionary] = QueryBindings("SELECT char_id FROM character WHERE nickname = ?;", [nickname])
+	return int(rows[0]["char_id"]) if not rows.is_empty() else NetworkCommons.PeerUnknownID
+
 func CharacterLogin(charID : int) -> bool:
 	var newTimestamp : int = SQLCommons.Timestamp()
 	var data : Dictionary = {
@@ -232,6 +237,12 @@ func GetStat(charID : int) -> Dictionary:
 	return {} if results.is_empty() else results[0]
 
 # SOM-IDLE: F2 settle — atomic transaction wrapper for OfflineSettle
+# NOTE: godot-sqlite's update_rows/delete_rows wrap their statement in their
+# own BEGIN/END — calling them inside this lambda nests transactions and
+# corrupts the commit sequence (nested END commits the outer work, outer
+# COMMIT then fails). Inside a lambda, use UpdateRowsRaw/insert_row/
+# select_rows/db.query_with_bindings ONLY — never update_rows/delete_rows
+# and never the QueryBindings/ExecuteBindings helpers (queryMutex re-entry).
 func Transaction(callable : Callable) -> bool:
 	var committed : bool = false
 	queryMutex.lock()
@@ -246,6 +257,16 @@ func Transaction(callable : Callable) -> bool:
 	queryMutex.unlock()
 	return committed
 
+# Transaction-safe UPDATE (no implicit BEGIN/END — unlike update_rows)
+func UpdateRowsRaw(table : String, conditions : String, data : Dictionary) -> bool:
+	var keys : PackedStringArray = PackedStringArray()
+	var bindings : Array = []
+	for key in data:
+		keys.append("%s=?" % key)
+		bindings.append(data[key])
+	var query : String = "UPDATE %s SET %s WHERE %s;" % [table, ", ".join(keys), conditions]
+	return db.query_with_bindings(query, bindings)
+
 # SOM-IDLE: F2 settle — direct stat row writes (level/xp/gold) without an agent
 func UpdateStatDirect(charID : int, newLevel : int, newExperience : int, newGold : int) -> bool:
 	var data : Dictionary = {
@@ -253,7 +274,7 @@ func UpdateStatDirect(charID : int, newLevel : int, newExperience : int, newGold
 		"experience" = newExperience,
 		"gp" = newGold,
 	}
-	return db.update_rows("stat", "char_id = %d" % charID, data)
+	return UpdateRowsRaw("stat", "char_id = %d" % charID, data)
 
 # SOM-IDLE: F2 settle — insert settled drops into the character inventory
 # NOTE: uses db.* directly (never QueryBindings) so it stays callable inside
@@ -261,12 +282,12 @@ func UpdateStatDirect(charID : int, newLevel : int, newExperience : int, newGold
 func AddItemToCharacter(charID : int, itemID : int, count : int) -> bool:
 	var existing : Array[Dictionary] = db.select_rows("item", "item_id = %d AND char_id = %d AND storage = 0;" % [itemID, charID], ["count"])
 	if not existing.is_empty():
-		return db.update_rows("item", "item_id = %d AND char_id = %d AND storage = 0;" % [itemID, charID], {"count" = int(existing[0]["count"]) + count})
+		return UpdateRowsRaw("item", "item_id = %d AND char_id = %d AND storage = 0" % [itemID, charID], {"count" = int(existing[0]["count"]) + count})
 	return db.insert_row("item", {"item_id" = itemID, "char_id" = charID, "count" = count, "storage" = 0, "customfield" = ""})
 
 # SOM-IDLE: F2 settle — anchor + efficiency reset
 func UpdateSettleAnchor(charID : int, lastSettledAt : int, efficiency : float) -> bool:
-	return db.update_rows("character", "char_id = %d" % charID, {"last_settled_at" = lastSettledAt, "session_efficiency" = efficiency})
+	return UpdateRowsRaw("character", "char_id = %d" % charID, {"last_settled_at" = lastSettledAt, "session_efficiency" = efficiency})
 
 # SOM-IDLE: F2 chests — instance rows only (opening is F4 scope)
 func AddChestInstance(charID : int, chestHash : int, origin : String) -> bool:
@@ -334,6 +355,41 @@ func GetLeaderboard(limit : int = 50) -> Array[Dictionary]:
 FROM character AS c INNER JOIN account AS a ON c.account_id = a.account_id \
 INNER JOIN stat AS s ON s.char_id = c.char_id \
 ORDER BY c.power_score DESC, c.char_id ASC LIMIT ?;", [limit])
+
+# SOM-IDLE: F4 — chest instance queries
+func GetClosedChests(charID : int) -> Array[Dictionary]:
+	return QueryBindings("SELECT id, chest_hash, origin, created_at FROM chest_instance WHERE char_id = ? AND item_state = 'closed' ORDER BY id;", [charID])
+
+func GetChestStats(charID : int) -> Dictionary:
+	var opened : int = int(QueryBindings("SELECT COUNT(*) AS n FROM chest_instance WHERE char_id = ? AND item_state = 'opened';", [charID])[0]["n"])
+	var closed : int = int(QueryBindings("SELECT COUNT(*) AS n FROM chest_instance WHERE char_id = ? AND item_state = 'closed';", [charID])[0]["n"])
+	return {"opened" = opened, "closed" = closed}
+
+func GetGems(accountID : int) -> int:
+	var rows : Array[Dictionary] = QueryBindings("SELECT gems FROM wallet WHERE account_id = ?;", [accountID])
+	var value : Variant = rows[0].get("gems", 0) if not rows.is_empty() else 0
+	return 0 if value == null else int(value)
+
+func SetGems(accountID : int, gems : int) -> bool:
+	# NOTE: update_rows reports success on 0 matched rows — gate the insert on
+	# row existence explicitly (same trap as SaveFormation, F3 report §bugs).
+	if QueryBindings("SELECT account_id FROM wallet WHERE account_id = ?;", [accountID]).is_empty():
+		return db.insert_row("wallet", {"account_id" = accountID, "gems" = gems, "updated_at" = SQLCommons.Timestamp()})
+	return db.update_rows("wallet", "account_id = %d" % accountID, {"gems" = gems, "updated_at" = SQLCommons.Timestamp()})
+
+# db-direct variants for use INSIDE SQL.Transaction() lambdas (no queryMutex,
+# no implicit update_rows transaction wrapper)
+func GetGemsRaw(accountID : int) -> int:
+	var rows : Array[Dictionary] = db.select_rows("wallet", "account_id = %d" % accountID, ["gems"])
+	var value : Variant = rows[0].get("gems", 0) if not rows.is_empty() else 0
+	return 0 if value == null else int(value)
+
+func SetGemsRaw(accountID : int, gems : int) -> bool:
+	# NOTE: update_rows reports success on 0 matched rows — gate the insert on
+	# row existence explicitly (same trap as SaveFormation, F3 report §bugs).
+	if db.select_rows("wallet", "account_id = %d" % accountID, ["account_id"]).is_empty():
+		return db.insert_row("wallet", {"account_id" = accountID, "gems" = gems, "updated_at" = SQLCommons.Timestamp()})
+	return UpdateRowsRaw("wallet", "account_id = %d" % accountID, {"gems" = gems, "updated_at" = SQLCommons.Timestamp()})
 
 func UpdateStat(charID : int, stats : ActorStats) -> bool:
 	if stats == null:
