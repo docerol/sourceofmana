@@ -184,6 +184,9 @@ func ConnectCharacter(nickname : String, peerID : int):
 			if peer.characterID == NetworkCommons.PeerUnknownID:
 				err = NetworkCommons.CharacterError.ERR_NO_CHARACTER_ID
 			else:
+				# SOM-IDLE: F2 — settle offline gains BEFORE reading charInfo so the
+				# agent loads already including xp/gold/drops earned while away.
+				OfflineSettle.SettlePending(peer.characterID)
 				var charInfo : Dictionary = Launcher.SQL.GetCharacterInfo(peer.characterID)
 				var spawnLocation : SpawnObject = PlayerAgent.GetSpawnFromData(charInfo)
 				var agent : PlayerAgent = WorldAgent.CreateAgent(spawnLocation, 0, nickname)
@@ -208,6 +211,13 @@ func DisconnectCharacter(peerID : int):
 			var ip : String = Peers.GetPeerIP(peerID)
 			Util.PrintLog("Server", "Player disconnected: %s (%d) via %s from %s" % [playerName, peerID, Peers.GetTransportName(Peers.GetTransport(peerID)), ip if not ip.is_empty() else "unavailable"])
 
+			# SOM-IDLE: F2 — persist session efficiency before the character row
+			# is refreshed; the settle at next login converts it into gains.
+			if player.idlePolicy:
+				Launcher.SQL.PersistSessionEfficiency(peer.characterID, player.idlePolicy.ComputeSessionEfficiency())
+				player.idlePolicy.Halt()
+				player.idlePolicy = null
+
 			Launcher.SQL.RefreshCharacter(player)
 			WorldAgent.RemoveAgent(player)
 			peer.SetAgent(NetworkCommons.PeerUnknownID)
@@ -216,6 +226,70 @@ func DisconnectCharacter(peerID : int):
 
 func RequestOnlineList(peerID : int):
 	Network.RefreshOnlineList(OnlineList.GetPlayerNames(), peerID)
+
+# SOM-IDLE: F2 idle-spike handlers (TECH_SPEC_CORE §5)
+func SetFormation(slot : int, charID : int, skillLoadout : PackedInt64Array, autoPotionPct : float, peerID : int):
+	var accountID : int = Peers.GetAccount(peerID)
+	if accountID == NetworkCommons.PeerUnknownID or slot < 0 or slot >= IdlePolicyService.MaxFormationSlots:
+		Network.FarmZoneFeedback(0, false, "invalid_formation", peerID)
+		return
+
+	# A player may only register characters from its own account
+	var ownerAccount : int = Launcher.SQL.GetAccountIDForCharacter(charID)
+	if charID != 0 and ownerAccount != accountID:
+		Network.FarmZoneFeedback(0, false, "not_owner", peerID)
+		return
+
+	var loadout : Array[int] = []
+	for skillID in skillLoadout:
+		loadout.append(int(skillID))
+	var clampedPct : float = clampf(autoPotionPct, 0.0, 100.0)
+	Launcher.SQL.SaveFormation(accountID, slot, charID, loadout, clampedPct)
+	Network.FarmZoneFeedback(0, true, "formation_saved", peerID)
+
+func SetFarmZone(zoneID : int, peerID : int):
+	var charID : int = Peers.GetCharacter(peerID)
+	var player : PlayerAgent = Peers.GetAgent(peerID)
+	if charID == NetworkCommons.PeerUnknownID or player == null:
+		Network.FarmZoneFeedback(zoneID, false, "not_logged_in", peerID)
+		return
+
+	var zone : FarmZoneData = FarmZoneData.GetZone(zoneID)
+	if zone == null or zone.mapID == DB.UnknownHash:
+		Network.FarmZoneFeedback(zoneID, false, "zone_unavailable", peerID)
+		return
+
+	# Spike gate: zone 1 is open; deeper tiers require the power score (§2)
+	if zone.tier > 1 and Formula.GetPowerScore(player.stat) < zone.minPower:
+		Network.FarmZoneFeedback(zoneID, false, "power_too_low", peerID)
+		return
+
+	Launcher.SQL.SetCharacterFarmZone(charID, zoneID)
+	IdlePolicyService.StartIdleSession(player, zoneID)
+	Network.FarmZoneFeedback(zoneID, true, "farming", peerID)
+
+func ClaimOfflineSettle(peerID : int):
+	var charID : int = Peers.GetCharacter(peerID)
+	if charID == NetworkCommons.PeerUnknownID:
+		Network.AFKReport({}, peerID)
+		return
+
+	var report : Dictionary = OfflineSettle.SettlePending(charID)
+	if report.is_empty():
+		# Nothing pending: report the current state so the client can sync
+		report = OfflineSettle.BuildReport(charID).to_dictionary()
+	Network.AFKReport(report, peerID)
+
+func GetAFKReport(peerID : int):
+	var charID : int = Peers.GetCharacter(peerID)
+	if charID == NetworkCommons.PeerUnknownID:
+		Network.AFKReport({}, peerID)
+		return
+	Network.AFKReport(OfflineSettle.BuildReport(charID).to_dictionary(), peerID)
+
+func GetSeasonPass(peerID : int):
+	# Spike stub: season pass mods are pinned to 1.0 (F3/F4 scope)
+	Network.SeasonPassState({"active": false, "mods": 1.0}, peerID)
 
 func CharacterListing(peerID : int):
 	var err : NetworkCommons.CharacterError = NetworkCommons.CharacterError.ERR_OK

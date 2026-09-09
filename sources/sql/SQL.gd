@@ -231,6 +231,79 @@ func GetStat(charID : int) -> Dictionary:
 	assert(results.size() == 1, "Character stat row is missing")
 	return {} if results.is_empty() else results[0]
 
+# SOM-IDLE: F2 settle — atomic transaction wrapper for OfflineSettle
+func Transaction(callable : Callable) -> bool:
+	var committed : bool = false
+	queryMutex.lock()
+	if db.query("BEGIN TRANSACTION;"):
+		var result : bool = callable.call()
+		if result and db.query("COMMIT;"):
+			committed = true
+		else:
+			db.query("ROLLBACK;")
+	else:
+		callable.call()
+	queryMutex.unlock()
+	return committed
+
+# SOM-IDLE: F2 settle — direct stat row writes (level/xp/gold) without an agent
+func UpdateStatDirect(charID : int, newLevel : int, newExperience : int, newGold : int) -> bool:
+	var data : Dictionary = {
+		"level" = newLevel,
+		"experience" = newExperience,
+		"gp" = newGold,
+	}
+	return db.update_rows("stat", "char_id = %d" % charID, data)
+
+# SOM-IDLE: F2 settle — insert settled drops into the character inventory
+# NOTE: uses db.* directly (never QueryBindings) so it stays callable inside
+# Transaction() without re-locking queryMutex.
+func AddItemToCharacter(charID : int, itemID : int, count : int) -> bool:
+	var existing : Array[Dictionary] = db.select_rows("item", "item_id = %d AND char_id = %d AND storage = 0;" % [itemID, charID], ["count"])
+	if not existing.is_empty():
+		return db.update_rows("item", "item_id = %d AND char_id = %d AND storage = 0;" % [itemID, charID], {"count" = int(existing[0]["count"]) + count})
+	return db.insert_row("item", {"item_id" = itemID, "char_id" = charID, "count" = count, "storage" = 0, "customfield" = ""})
+
+# SOM-IDLE: F2 settle — anchor + efficiency reset
+func UpdateSettleAnchor(charID : int, lastSettledAt : int, efficiency : float) -> bool:
+	return db.update_rows("character", "char_id = %d" % charID, {"last_settled_at" = lastSettledAt, "session_efficiency" = efficiency})
+
+# SOM-IDLE: F2 chests — instance rows only (opening is F4 scope)
+func AddChestInstance(charID : int, chestHash : int, origin : String) -> bool:
+	return db.insert_row("chest_instance", {"char_id" = charID, "chest_hash" = chestHash, "origin" = origin, "item_state" = "closed", "created_at" = SQLCommons.Timestamp()})
+
+# SOM-IDLE: F2 formations — loadout + auto-potion per account slot
+func SaveFormation(accountID : int, slot : int, charID : int, skillLoadout : Array[int], autoPotionPct : float) -> bool:
+	var data : Dictionary = {
+		"char_id" = charID,
+		"skill_loadout" = var_to_str(skillLoadout),
+		"auto_potion_pct" = autoPotionPct,
+	}
+	return db.update_rows("formation", "account_id = %d AND slot = %d;" % [accountID, slot], data) or db.insert_row("formation", {
+		"account_id" = accountID,
+		"slot" = slot,
+		"char_id" = charID,
+		"skill_loadout" = var_to_str(skillLoadout),
+		"auto_potion_pct" = autoPotionPct,
+	})
+
+func GetFormationForCharacter(charID : int) -> Dictionary:
+	var rows : Array[Dictionary] = QueryBindings("SELECT * FROM formation WHERE char_id = ? ORDER BY slot LIMIT 1;", [charID])
+	return {} if rows.is_empty() else rows[0]
+
+# SOM-IDLE: F2 — character farm zone binding
+func SetCharacterFarmZone(charID : int, zoneID : int) -> bool:
+	return db.update_rows("character", "char_id = %d" % charID, {"farm_zone" = zoneID})
+
+# SOM-IDLE: F2 — persist live session efficiency on disconnect (NetServer hook)
+func PersistSessionEfficiency(charID : int, efficiency : float) -> bool:
+	return db.update_rows("character", "char_id = %d" % charID, {"session_efficiency" = efficiency})
+
+# SOM-IDLE: F2 — ownership check for formation RPCs
+func GetAccountIDForCharacter(charID : int) -> int:
+	var rows : Array[Dictionary] = QueryBindings("SELECT account_id FROM character WHERE char_id = ?;", [charID])
+	return int(rows[0]["account_id"]) if not rows.is_empty() else NetworkCommons.PeerUnknownID
+
 func UpdateStat(charID : int, stats : ActorStats) -> bool:
 	if stats == null:
 		return false

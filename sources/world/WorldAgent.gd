@@ -81,9 +81,22 @@ static func PushAgent(agent : BaseAgent, inst : WorldInstance):
 		elif agent is NpcAgent:
 			inst.npcs.push_back(agent)
 
-		inst.add_child.call_deferred(agent)
+		# SOM-IDLE: F2 — idempotent deferred push: two pushes queued in the same
+		# frame (CreateAgent → Warp, e.g. spawn straight into a farm instance)
+		# used to collide ("already has a parent"). Converge to the last target.
+		_DeferredPush.call_deferred(agent, inst)
 	else:
 		RemoveAgent(agent)
+
+static func _DeferredPush(agent : BaseAgent, inst : WorldInstance):
+	if not is_instance_valid(agent) or not is_instance_valid(inst) or agent.is_queued_for_deletion():
+		return
+	var parent : Node = agent.get_parent()
+	if parent == inst:
+		return
+	if parent != null:
+		parent.remove_child(agent)
+	inst.add_child(agent)
 
 static func CreateAgent(spawn : SpawnObject, instanceID : int = 0, nickname : String = "") -> BaseAgent:
 	if not spawn or not spawn.map:

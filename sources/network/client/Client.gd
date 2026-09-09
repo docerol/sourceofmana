@@ -308,6 +308,32 @@ func PushNotification(notif : String, _peerID : int):
 	if Launcher.Player and Launcher.GUI:
 		Launcher.GUI.notificationLabel.AddNotification(notif)
 
+# SOM-IDLE: F2 idle-spike client handlers (TECH_SPEC_CORE §5)
+func AFKReport(report : Dictionary, _peerID : int):
+	if not Launcher.GUI:
+		return
+	if report.is_empty():
+		Launcher.GUI.notificationLabel.AddNotification("AFK: nothing to claim")
+		return
+
+	var xp : int = int(report.get("xp_earned", 0))
+	var gold : int = int(report.get("gold_earned", 0))
+	var hours : float = float(report.get("hours", 0.0))
+	Launcher.GUI.notificationLabel.AddNotification("AFK %.1fh: +%s XP, +%s GP" % [hours, Util.FormatNumber(xp), Util.FormatNumber(gold)])
+
+func FarmZoneFeedback(zoneID : int, ok : bool, reason : String, _peerID : int):
+	if not Launcher.GUI:
+		return
+	if ok:
+		Launcher.GUI.notificationLabel.AddNotification("Farm zone %d: %s" % [zoneID, reason])
+	else:
+		Launcher.GUI.notificationLabel.AddNotification("Farm zone %d rejected: %s" % [zoneID, reason])
+
+func SeasonPassState(state : Dictionary, _peerID : int):
+	# Spike stub — F3/F4 will surface the pass in the GUI
+	if Launcher.GUI and bool(state.get("active", false)):
+		Launcher.GUI.notificationLabel.AddNotification("Season pass active")
+
 func RefreshOnlineList(players : PackedStringArray, _peerID : int):
 	if Launcher.GUI:
 		Launcher.GUI.socialWindow.RefreshOnline(players)

@@ -9,6 +9,24 @@ var players : Array[BaseAgent]			= []
 var drops : Dictionary[int, Drop]		= {}
 var map : WorldMap						= null
 var timers : Node						= Node.new()
+# SOM-IDLE: F2 — per-instance idle policies (server-only, ticked in _process)
+var idlePolicies : Array[IdlePolicy]	= []
+
+#
+func _process(delta : float):
+	# SOM-IDLE: F2 — tick idle policies; server-side only (Launcher.World guard)
+	if Launcher.World != null and not idlePolicies.is_empty():
+		for policy in idlePolicies:
+			if policy and is_instance_valid(policy.agent):
+				policy.Tick(delta)
+
+# SOM-IDLE: F2 — register/unregister helpers for player policies
+func AttachIdlePolicy(policy : IdlePolicy):
+	if policy and not idlePolicies.has(policy):
+		idlePolicies.append(policy)
+
+func DetachIdlePolicy(policy : IdlePolicy):
+	idlePolicies.erase(policy)
 
 #
 func _ready():
@@ -30,8 +48,19 @@ func CheckNavReady():
 func _map_loaded():
 	for spawn in map.spawns:
 		if spawn:
-			for i in spawn.count:
-				WorldAgent.CreateAgent(spawn, id, spawn.nick)
+			# SOM-IDLE: F2 — farm instances own their mob respawn loop so a
+			# dedicated zone never depletes (ARCHITECTURE §7: instâncias dedicadas)
+			if id >= IdlePolicyService.ZoneInstanceBase:
+				# SOM-IDLE: F2 — farm instances own their mob respawn loop so a
+				# dedicated zone never depletes (ARCHITECTURE §7: instâncias dedicadas)
+				var farmSpawn : SpawnObject = spawn.duplicate()
+				farmSpawn.map = map		# duplicate() copies only @export vars
+				farmSpawn.is_persistant = true
+				for i in farmSpawn.count:
+					WorldAgent.CreateAgent(farmSpawn, id, farmSpawn.nick)
+			else:
+				for i in spawn.count:
+					WorldAgent.CreateAgent(spawn, id, spawn.nick)
 	RefreshProcessMode()
 
 #

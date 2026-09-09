@@ -113,6 +113,30 @@ jobs:
           name: ${{ matrix.name }}
           path: build/${{ matrix.name }}
 
+  # SOM-IDLE: F2 idle-spike headless test suite (XP curve, zones, settle, ledger)
+  idle-tests:
+    runs-on: ubuntu-latest
+    name: SOM-IDLE Idle Tests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Godot
+        uses: liuyuzui/godot-action-setup@v1
+        with:
+          godot-version: ${{ env.GODOT_VERSION }}
+
+      - name: Import assets
+        run: |
+          cd "$PROJECT_PATH"
+          godot --headless --editor --import --quit
+
+      - name: Run SOM-IDLE idle tests
+        run: |
+          cd "$PROJECT_PATH"
+          timeout 300 godot --headless --path . -s tests/run_idle_tests.gd
+          # Exit code = number of failed checks (0 = green)
+
   snap:
     runs-on: ubuntu-latest
     needs: builds

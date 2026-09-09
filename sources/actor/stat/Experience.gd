@@ -1,159 +1,65 @@
 extends RefCounted
 class_name Experience
 
-const _experienceTable = [
-	# Level 1-9
-	9,
-	16,
-	25,
-	36,
-	77,
-	112,
-	153,
-	200,
-	253,
-	# Level 10-19
-	320,
-	385,
-	490,
-	585,
-	700,
-	830,
-	970,
-	1120,
-	1260,
-	1420,
-	# Level 20-29
-	1620,
-	1860,
-	1990,
-	2240,
-	2504,
-	2950,
-	3426,
-	3934,
-	4474,
-	6889,
-	# Level 30-39
-	7995,
-	9174,
-	10425,
-	11748,
-	13967,
-	15775,
-	17678,
-	19677,
-	21773,
-	30543,
-	# Level 40-49
-	34212,
-	38065,
-	42102,
-	46323,
-	53026,
-	58419,
-	64041,
-	69892,
-	75973,
-	102468,
-	# Level 50-59
-	115254,
-	128692,
-	142784,
-	157528,
-	178184,
-	196300,
-	215198,
-	234879,
-	255341,
-	330188,
-	# Level 60-69
-	365914,
-	403224,
-	442116,
-	482590,
-	536948,
-	585191,
-	635278,
-	687211,
-	740988,
-	925400,
-	# Level 70-79
-	1473746,
-	1594058,
-	1718928,
-	1848355,
-	1982340,
-	2230113,
-	2386162,
-	2547417,
-	2713878,
-	3206160,
-	# Level 80-89
-	3681024,
-	4022472,
-	4377024,
-	4744680,
-	5125440,
-	5767272,
-	6204000,
-	6655464,
-	7121664,
-	7602600,
-	# Level 90-99
-	9738720,
-	11649960,
-	13643520,
-	18339300,
-	23836800,
-	35658000,
-	48687000,
-	58135000,
-	99999999,
-	103000000,
-	# Level 100-109
-	107000000,
-	112000000,
-	116000000,
-	121000000,
-	125000000,
-	130000000,
-	134000000,
-	139000000,
-	145000000,
-	152200000,
-	# Level 110-119
-	160840000,
-	171200000,
-	191930000,
-	202290000,
-	214720000,
-	229640000,
-	247550000,
-	283370000,
-	301280000,
-	322770000,
-	# Level 120-129
-	348560000,
-	379500000,
-	417450000,
-	459195000,
-	505114500,
-	555625950,
-	622301064,
-	696977191,
-	780614454,
-	880533104,
-	# Level 130-135
-	993241342,
-	1120376234,
-	1263784392,
-	1425548794,
-	1608019039,
-	2147483647
-]
+# SOM-IDLE: F2 idle progression — hardcoded table replaced by formula
+# Contract: TECH_SPEC_CORE.md §1 + XP_PROGRESSION.md §4
+# XP(L -> L+1) = round(XpBase * Growth^L); int64-safe up to ~L180 (margin to MAX_LEVEL 150)
 
-const MAX_LEVEL_REACHED = 0
+const MAX_LEVEL_REACHED : int = 0
 
-static func GetNeededExperienceForNextLevel(currentLevel: int) -> int:
-	return _experienceTable[currentLevel] if currentLevel < _experienceTable.size() else MAX_LEVEL_REACHED
+const MAX_LEVEL : int = 150
+const XpBase : int = 8000
+const Growth : float = 1.22
+
+# Per-level and cumulative caches (computed lazily, deterministic)
+static var _neededCache : Dictionary[int, int]	= {}
+static var _totalCache : Dictionary[int, int]	= {}
+
+#
+static func GetNeededExperienceForNextLevel(currentLevel : int) -> int:
+	if currentLevel < 1 or IsMaxLevel(currentLevel):
+		return MAX_LEVEL_REACHED
+
+	var cached : int = _neededCache.get(currentLevel, 0)
+	if cached > 0:
+		return cached
+
+	# int64-safe: max value at L149 is ~5.9e16 (<< 9.2e18)
+	var needed : int = roundi(XpBase * pow(Growth, currentLevel))
+	_neededCache[currentLevel] = needed
+	return needed
+
+# Cumulative XP needed to reach `level` starting from level 1 (0 for level <= 1)
+static func GetTotalExperienceForLevel(level : int) -> int:
+	if level <= 1:
+		return 0
+
+	var cached : int = _totalCache.get(level, -1)
+	if cached >= 0:
+		return cached
+
+	# Extend from the highest cached ancestor to keep amortized O(1)
+	var start : int = 2
+	var total : int = 0
+	for probe in range(level, 1, -1):
+		if _totalCache.has(probe):
+			total = _totalCache[probe]
+			start = probe + 1
+			break
+
+	for iter in range(start, level + 1):
+		total += GetNeededExperienceForNextLevel(iter - 1)
+		_totalCache[iter] = total
+	return total
+
+# 0.0..1.0 progress of `experience` towards `level`+1 (1.0 at max level) — used by the UI bar
+static func GetLevelProgress(experience : int, level : int) -> float:
+	if IsMaxLevel(level):
+		return 1.0
+	var needed : int = GetNeededExperienceForNextLevel(level)
+	if needed == MAX_LEVEL_REACHED:
+		return 1.0
+	return clampf(float(experience) / float(needed), 0.0, 1.0)
+
+static func IsMaxLevel(level : int) -> bool:
+	return level >= MAX_LEVEL

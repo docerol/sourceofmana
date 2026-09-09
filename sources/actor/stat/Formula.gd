@@ -142,11 +142,36 @@ static func ApplyXp(agent : AIAgent):
 	for entry in agent.attackers:
 		if entry.attacker != null and not entry.attacker.is_queued_for_deletion():
 			var damageRatio : float = agent.GetDamageRatio(entry.attacker)
-			var bonusScaled : int = int(bonus * damageRatio)
-			entry.attacker.stat.AddExperience(bonusScaled, false)
+
+			# SOM-IDLE: F2 idle spike — zone-driven XP/gold faucet (TECH_SPEC_CORE §2,
+			# XP_PROGRESSION §4.1.2/§4.1.3). Attackers farming inside a farm zone draw
+			# xp/gold from the zone tables instead of the mob baseExp.
+			var zone : FarmZoneData = null
+			var policy : IdlePolicy = entry.attacker.idlePolicy if entry.attacker is PlayerAgent else null
+			if policy:
+				zone = FarmZoneData.GetZone(policy.zoneID)
+
+			if zone:
+				var zoneXp : int = zone.xpPerKill
+				if entry.attacker.stat.level < FarmZoneData.NewbieBoostMaxLevel:
+					zoneXp = roundi(float(zoneXp) * FarmZoneData.NewbieBoostFactor)
+				zoneXp = maxi(1, roundi(float(zoneXp) * damageRatio))
+				entry.attacker.stat.AddExperience(zoneXp, false)
+
+				if damageRatio > 0.5:
+					var zoneGold : int = maxi(1, roundi(float(zone.goldPerKill) * damageRatio))
+					entry.attacker.stat.AddGP(zoneGold, false)
+			else:
+				var bonusScaled : int = int(bonus * damageRatio)
+				entry.attacker.stat.AddExperience(bonusScaled, false)
+
 			if damageRatio > 0.5 and entry.attacker.progress:
 				entry.attacker.progress.AddBestiary(agent.data._id, 1)
 				entry.attacker.enemy_killed.emit(entry.attacker, agent.data._id)
+
+# SOM-IDLE: F2 idle spike — spike power score proxy (§2): level*10 + attack + defense
+static func GetPowerScore(stat : ActorStats) -> int:
+	return stat.level * 10 + stat.current.attack + stat.current.defense
 
 # Attribute points
 static func GetMaxAttributePoints(level : int) -> int:

@@ -356,6 +356,39 @@ func SetAttributes(strength : int, vitality : int, agility : int, endurance : in
 func LevelUp(agentRID : int, peerID : int = NetworkCommons.PeerOfflineID):
 	CallClient("LevelUp", [agentRID], peerID)
 
+# SOM-IDLE: F2 idle-spike RPCs (TECH_SPEC_CORE §5)
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func SetFormation(slot : int, charID : int, skillLoadout : PackedInt64Array, autoPotionPct : float, peerID : int = NetworkCommons.PeerAuthorityID):
+	CallServer("SetFormation", [slot, charID, skillLoadout, autoPotionPct], peerID, NetworkCommons.DelayConfig)
+
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func SetFarmZone(zoneID : int, peerID : int = NetworkCommons.PeerAuthorityID):
+	CallServer("SetFarmZone", [zoneID], peerID, NetworkCommons.DelayConfig)
+
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func ClaimOfflineSettle(peerID : int = NetworkCommons.PeerAuthorityID):
+	CallServer("ClaimOfflineSettle", [], peerID, NetworkCommons.DelayConfig)
+
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func GetAFKReport(peerID : int = NetworkCommons.PeerAuthorityID):
+	CallServer("GetAFKReport", [], peerID, NetworkCommons.DelayMinute)
+
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func GetSeasonPass(peerID : int = NetworkCommons.PeerAuthorityID):
+	CallServer("GetSeasonPass", [], peerID, NetworkCommons.DelayMinute)
+
+@rpc("authority", "call_remote", "reliable", EChannel.ACTION)
+func AFKReport(report : Dictionary, peerID : int = NetworkCommons.PeerOfflineID):
+	CallClient("AFKReport", [report], peerID)
+
+@rpc("authority", "call_remote", "reliable", EChannel.ACTION)
+func FarmZoneFeedback(zoneID : int, ok : bool, reason : String, peerID : int = NetworkCommons.PeerOfflineID):
+	CallClient("FarmZoneFeedback", [zoneID, ok, reason], peerID)
+
+@rpc("authority", "call_remote", "reliable", EChannel.ACTION)
+func SeasonPassState(state : Dictionary, peerID : int = NetworkCommons.PeerOfflineID):
+	CallClient("SeasonPassState", [state], peerID)
+
 # Inventory
 @rpc("authority", "call_remote", "reliable", EChannel.ENTITY)
 func ItemAdded(itemID : int, customfield : StringName, count : int, peerID : int = NetworkCommons.PeerOfflineID):

@@ -10,6 +10,8 @@ var respawnDestination : Destination	= null
 var exploreOrigin : Destination			= null
 var ownScript : NpcScript				= null
 var isWarping : bool					= false
+# SOM-IDLE: F2 idle-spike policy handle (managed by EconomyService)
+var idlePolicy : IdlePolicy				= null
 
 # Regen
 var regenTimer : Timer					= Timer.new()
@@ -70,6 +72,14 @@ func SetCharacterInfo(charData : Dictionary, charID : int):
 	exploreOrigin = GetExploreFromData(charData)
 	# Progress
 	progress.ImportProgress(charID)
+	# SOM-IDLE: F2 — remember the owning character id (used by idle services)
+	characterID = charID
+
+# SOM-IDLE: F2 — owning character id (0 while not bound to a character row)
+var characterID : int = 0
+
+func GetCharacterID() -> int:
+	return characterID
 
 #
 func UpdateLastStats():
@@ -237,6 +247,10 @@ func _ready():
 	stat.vital_stats_updated.connect(RequestStatsUpdate)
 
 func _exit_tree():
+	# SOM-IDLE: F2 — stop the idle brain when the agent leaves the world
+	if idlePolicy:
+		idlePolicy.Halt()
+		idlePolicy = null
 	ClearScript()
 	super._exit_tree()
 

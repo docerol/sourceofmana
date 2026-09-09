@@ -81,6 +81,41 @@ static func AddThousandsSeparators(integerPart : String) -> String:
 		charCounter -= 3
 	return integerPart
 
+# SOM-IDLE: F2 idle spike — compact number formatting (TECH_SPEC_CORE §6)
+# Below 100k: pt-BR thousands separators ("123.456"); above: K/M/B/T/Qa/Qi
+# with 3 significant digits ("1.23M", "12.3M", "123M").
+static func FormatNumber(value : int) -> String:
+	var negative : bool = value < 0
+	var magnitude : int = absi(value)
+
+	if magnitude < 100000:
+		var formatted : String = str(magnitude)
+		var counter : int = formatted.length() - 3
+		while counter > 0:
+			formatted = formatted.insert(counter, ".")
+			counter -= 3
+		return "-" + formatted if negative else formatted
+
+	var suffixes : Array[String] = ["K", "M", "B", "T", "Qa", "Qi"]
+	var suffixIdx : int = -1
+	var scaled : float = float(magnitude)
+	while scaled >= 1000.0 and suffixIdx < suffixes.size() - 1:
+		scaled /= 1000.0
+		suffixIdx += 1
+
+	var text : String = ""
+	if scaled >= 100.0:
+		text = "%d" % roundi(scaled)
+	elif scaled >= 10.0:
+		text = "%.1f" % scaled
+	else:
+		text = "%.2f" % scaled
+	# Trim trailing zeros (53.80 → 53.8, 59.0 → 59) before appending the suffix
+	if text.contains("."):
+		text = text.rstrip("0").rstrip(".")
+	text += suffixes[suffixIdx]
+	return "-" + text if negative else text
+
 # Dictionary
 static func DicCheckOrAdd(dic : Dictionary[Variant, Variant], key : Variant, value : Variant):
 	if not key in dic:

@@ -44,6 +44,8 @@ func RegisterCommands():
 	CommandManager.Register("w", CommandWhisper, ActorCommons.Permission.NONE, "w <player> <message>" )
 	CommandManager.Register("query", CommandQuery, ActorCommons.Permission.NONE, "query <player>" )
 	CommandManager.Register("q", CommandQuery, ActorCommons.Permission.NONE, "q <player>" )
+	# SOM-IDLE: F2 idle-spike — in-game farm session control
+	CommandManager.Register("farm", CommandFarm, ActorCommons.Permission.NONE, "farm <zone_id 1-40> | farm stop" )
 
 static func UnregisterCommands():
 	CommandManager.Unregister("spawn")
@@ -87,6 +89,42 @@ static func UnregisterCommands():
 	CommandManager.Unregister("w")
 	CommandManager.Unregister("query")
 	CommandManager.Unregister("q")
+	# SOM-IDLE: F2
+	CommandManager.Unregister("farm")
+
+# SOM-IDLE: F2 — start/stop an idle farming session ("/farm <zone>" / "/farm stop")
+func CommandFarm(caller : PlayerAgent, zoneArg : String = "") -> bool:
+	if not caller:
+		return false
+
+	var arg : String = zoneArg.strip_edges().to_lower()
+	if arg == "stop" or arg == "off":
+		if caller.idlePolicy:
+			IdlePolicyService.StopIdleSession(caller)
+			Network.CommandFeedback("Idle farming stopped", caller.peerID)
+			return true
+		Network.CommandFeedback("No active farming session", caller.peerID)
+		return false
+
+	var zoneID : int = arg.to_int()
+	if zoneID <= 0:
+		Network.CommandFeedback("Usage: /farm <zone_id 1-40> | /farm stop", caller.peerID)
+		return false
+
+	var zone : FarmZoneData = FarmZoneData.GetZone(zoneID)
+	if zone == null or zone.mapID == DB.UnknownHash:
+		Network.CommandFeedback("Zone %d is not available in this spike" % zoneID, caller.peerID)
+		return false
+
+	if zone.tier > 1 and Formula.GetPowerScore(caller.stat) < zone.minPower:
+		Network.CommandFeedback("Zone %d requires power %d" % [zoneID, zone.minPower], caller.peerID)
+		return false
+
+	Launcher.SQL.SetCharacterFarmZone(caller.GetCharacterID(), zoneID)
+	var started : bool = IdlePolicyService.StartIdleSession(caller, zoneID)
+	if not started:
+		Network.CommandFeedback("Could not start farming zone %d" % zoneID, caller.peerID)
+	return started
 
 # Spawn 'x' times a specific monster near the calling player
 func CommandSpawn(caller : PlayerAgent, entityName : String, countStr : String = "1") -> bool:

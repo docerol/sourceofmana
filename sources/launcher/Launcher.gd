@@ -15,8 +15,10 @@ var Map : ServiceBase				= null
 # Server services
 var World : ServiceBase				= null
 var SQL : ServiceBase				= null
-var Discord : ServiceBase			= null
+var Discord : DiscordService		= null
 var Email : EmailService			= null
+# SOM-IDLE: F2 — economy/settle service (settle-path ledger writes)
+var Economy : EconomyService		= null
 
 # Accessors
 var Player : Entity					= null
@@ -59,11 +61,14 @@ func Server():
 	SQL				= SQLService.new()
 	Discord			= DiscordService.new()
 	Email			= EmailService.new()
+	# SOM-IDLE: F2 — economy service lives with the other server services
+	Economy			= EconomyService.new()
 
 	add_child.call_deferred(World)
 	add_child.call_deferred(SQL)
 	add_child.call_deferred(Discord)
 	add_child.call_deferred(Email)
+	add_child.call_deferred(Economy)
 
 func Reset(clientStarted : bool, serverStarted : bool):
 	if not clientStarted:
@@ -119,6 +124,12 @@ func Reset(clientStarted : bool, serverStarted : bool):
 		if Email:
 			Email.queue_free()
 			Email = null
+		# SOM-IDLE: F2
+		if Economy:
+			Economy.set_name("EconomyDestroyed")
+			Economy.Destroy()
+			Economy.queue_free()
+			Economy = null
 
 func Quit():
 	Reset(false, false)
@@ -170,6 +181,8 @@ func _post_launch():
 	if SQL and not SQL.isInitialized:			SQL._post_launch()
 	if Discord and not Discord.isInitialized:	Discord._post_launch()
 	if Audio:									Audio._post_launch()
+	# SOM-IDLE: F2 — economy service after SQL (it only wraps SQL calls)
+	if Economy and not Economy.isInitialized:	Economy._post_launch()
 
 func _quit():
 	Quit()

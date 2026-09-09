@@ -52,6 +52,9 @@ const DelayInstant : int				= 0
 const DelayShort : int					= 16
 const DelayDefault : int				= 50
 const DelayLogin : int					= 1000
+# SOM-IDLE: F2 idle-spike rate limits — 5/min config actions, 1/min minute-tier
+const DelayConfig : int					= 12000
+const DelayMinute : int					= 60000
 
 const Timeout : int						= 1000
 const TimeoutMin : int					= 30000
