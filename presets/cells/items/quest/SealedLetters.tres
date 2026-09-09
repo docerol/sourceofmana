@@ -8,5 +8,6 @@ script = ExtResource("2_6b5vw")
 slot = 11
 name = "Sealed Letters"
 description = "A sealed envelope containing old letters between two friends."
+tier = 1
 icon = ExtResource("1_jk2eh")
 weight = 10.0

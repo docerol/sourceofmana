@@ -19,6 +19,7 @@ script = ExtResource("4_ckwuv")
 id = 3877745440
 name = "Cactus Drink"
 description = "A refreshing cactus drink."
+tier = 4
 icon = ExtResource("1_ml7mk")
 weight = 5.0
 stackable = true

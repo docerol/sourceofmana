@@ -8,6 +8,7 @@ script = ExtResource("2_v0qjy")
 id = 3136767230
 name = "Maggot Slime"
 description = "A thick, viscous slime secreted by desert maggots. Used in the brewing of healing remedies."
+tier = 1
 icon = ExtResource("1_mc4ws")
 weight = 2.0
 stackable = true

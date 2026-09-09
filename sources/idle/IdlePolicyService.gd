@@ -92,8 +92,12 @@ static func _Attach(player : PlayerAgent, map : WorldMap, instID : int, zoneID :
 	var policy : IdlePolicy = IdlePolicy.new()
 	policy.Setup(player, zoneID)
 
-	# Formation overrides (loadout + auto-potion threshold), slot 0 for spike
-	var formation : Dictionary = Launcher.SQL.GetFormationForCharacter(player.GetCharacterID())
+	# SOM-IDLE: F3 — formation overrides (loadout + auto-potion) from the slot
+	# the character selected (character.formation_slot), not hardcoded slot 0.
+	var accountID : int = Launcher.SQL.GetAccountIDForCharacter(player.GetCharacterID())
+	var slotRow : Dictionary = Launcher.SQL.GetCharacter(player.GetCharacterID())
+	var slot : int = clampi(int(slotRow.get("formation_slot", 0) if slotRow.get("formation_slot", 0) != null else 0), 0, MaxFormationSlots - 1)
+	var formation : Dictionary = Launcher.SQL.GetFormationForSlot(accountID, slot) if accountID != NetworkCommons.PeerUnknownID else {}
 	if not formation.is_empty():
 		var loadoutRaw : String = str(formation.get("skill_loadout", ""))
 		if not loadoutRaw.is_empty():

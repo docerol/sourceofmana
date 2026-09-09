@@ -9,5 +9,6 @@ slot = 11
 id = 3230422613
 name = "Letter"
 description = "A stamped letter given for a specific quest."
+tier = 1
 icon = ExtResource("1_jk2eh")
 weight = 15.0

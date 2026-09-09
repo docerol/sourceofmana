@@ -45,7 +45,11 @@ func RegisterCommands():
 	CommandManager.Register("query", CommandQuery, ActorCommons.Permission.NONE, "query <player>" )
 	CommandManager.Register("q", CommandQuery, ActorCommons.Permission.NONE, "q <player>" )
 	# SOM-IDLE: F2 idle-spike — in-game farm session control
-	CommandManager.Register("farm", CommandFarm, ActorCommons.Permission.NONE, "farm <zone_id 1-40> | farm stop" )
+	CommandManager.Register("farm", CommandFarm, ActorCommons.Permission.NONE, "farm <zone_id 1-40> [slot 0-5] | farm stop" )
+	# SOM-IDLE: F3
+	CommandManager.Register("zones", CommandZones, ActorCommons.Permission.NONE, "zones" )
+	CommandManager.Register("top", CommandTop, ActorCommons.Permission.NONE, "top" )
+	CommandManager.Register("vip", CommandVIP, ActorCommons.Permission.NONE, "vip" )
 
 static func UnregisterCommands():
 	CommandManager.Unregister("spawn")
@@ -91,6 +95,41 @@ static func UnregisterCommands():
 	CommandManager.Unregister("q")
 	# SOM-IDLE: F2
 	CommandManager.Unregister("farm")
+	# SOM-IDLE: F3
+	CommandManager.Unregister("zones")
+	CommandManager.Unregister("top")
+	CommandManager.Unregister("vip")
+
+# SOM-IDLE: F3 — zone map listing with power gates ("/zones")
+func CommandZones(caller : PlayerAgent) -> bool:
+	if not caller:
+		return false
+
+	var power : int = Formula.GetPowerScore(caller.stat)
+	var list : PackedStringArray = PackedStringArray()
+	list.append("Zones (your power %d):" % power)
+	for zoneID in range(1, FarmZoneData.GetZoneCount() + 1):
+		var zone : FarmZoneData = FarmZoneData.GetZone(zoneID)
+		if zone == null:
+			continue
+		var locked : bool = zone.tier > 1 and power < zone.minPower
+		list.append("#%d %s — T%d %s (power %d)" % [zoneID, zone.mapName, zone.tier, "LOCKED" if locked else "OPEN", zone.minPower])
+	Network.CommandFeedback("\n".join(list), caller.peerID)
+	return true
+
+# SOM-IDLE: F3 — power score leaderboard ("/top")
+func CommandTop(caller : PlayerAgent) -> bool:
+	if not caller:
+		return false
+	Network.GetLeaderboard(caller.peerID)
+	return true
+
+# SOM-IDLE: F3 — VIP status ("/vip")
+func CommandVIP(caller : PlayerAgent) -> bool:
+	if not caller:
+		return false
+	Network.GetVIPState(caller.peerID)
+	return true
 
 # SOM-IDLE: F2 — start/stop an idle farming session ("/farm <zone>" / "/farm stop")
 func CommandFarm(caller : PlayerAgent, zoneArg : String = "") -> bool:
@@ -107,6 +146,13 @@ func CommandFarm(caller : PlayerAgent, zoneArg : String = "") -> bool:
 		return false
 
 	var zoneID : int = arg.to_int()
+	var formSlot : int = 0
+	# "/farm 5 2" — zone 5 with formation slot 2
+	if arg.contains(" "):
+		var parts : PackedStringArray = arg.split(" ", false)
+		zoneID = parts[0].to_int()
+		if parts.size() > 1:
+			formSlot = parts[1].to_int()
 	if zoneID <= 0:
 		Network.CommandFeedback("Usage: /farm <zone_id 1-40> | /farm stop", caller.peerID)
 		return false
@@ -120,6 +166,7 @@ func CommandFarm(caller : PlayerAgent, zoneArg : String = "") -> bool:
 		Network.CommandFeedback("Zone %d requires power %d" % [zoneID, zone.minPower], caller.peerID)
 		return false
 
+	Launcher.SQL.SetCharacterFormationSlot(caller.GetCharacterID(), clampi(formSlot, 0, IdlePolicyService.MaxFormationSlots - 1))
 	Launcher.SQL.SetCharacterFarmZone(caller.GetCharacterID(), zoneID)
 	var started : bool = IdlePolicyService.StartIdleSession(caller, zoneID)
 	if not started:

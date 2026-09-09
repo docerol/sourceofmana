@@ -14,5 +14,6 @@ shader = ExtResource("3_lhni1")
 id = 1416971591
 name = "V-Neck Tee"
 description = "A thin, soft and warm shirt."
+tier = 1
 icon = ExtResource("1_7885e")
 weight = 300.0

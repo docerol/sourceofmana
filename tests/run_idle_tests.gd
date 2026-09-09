@@ -64,6 +64,15 @@ func _run_tests():
 	if suites.Check(dbReady, "DB initialized (maps/items/skills loaded)"):
 		suites.SuiteDBBacked(sql, economy)
 
+		# SOM-IDLE: F3 suites (tiers, spawn table, VIP, leaderboard, slots)
+		suites.SuiteItemTiers()
+		suites.SuiteFarmSpawnTable()
+		var f3char : int = suites.CreateFixture(sql, "idle_f3_account", "IdleF3Tester")
+		if suites.Check(f3char != 0, "F3 fixture created (charID %d)" % f3char):
+			suites.SuiteVIPMods(sql, f3char, sql.GetAccountIDForCharacter(f3char))
+			suites.SuiteLeaderboard(sql, f3char)
+			suites.SuiteFormationSlots(sql, f3char, sql.GetAccountIDForCharacter(f3char))
+
 		# §7.4 deterministic live farm sim (zone 1) — after the DB suites so the
 		# fixture character is already leveled by the settle
 		await suites.SuiteIdlePolicySim(suites.lastCharID)

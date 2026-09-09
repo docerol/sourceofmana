@@ -53,9 +53,14 @@ func _map_loaded():
 			if id >= IdlePolicyService.ZoneInstanceBase:
 				# SOM-IDLE: F2 — farm instances own their mob respawn loop so a
 				# dedicated zone never depletes (ARCHITECTURE §7: instâncias dedicadas)
+				# SOM-IDLE: F3 — dedicated spawn table: farm instances scale the
+				# base group counts (GetFarmSpawnMultiplier) instead of copying the
+				# adventure density, feeding the zone pacing par (spike report §5.3).
 				var farmSpawn : SpawnObject = spawn.duplicate()
 				farmSpawn.map = map		# duplicate() copies only @export vars
 				farmSpawn.is_persistant = true
+				farmSpawn.count = spawn.count * maxi(1, FarmZoneData.GetFarmSpawnMultiplier(id - IdlePolicyService.ZoneInstanceBase))
+				farmSpawn.respawn_delay = FarmZoneData.GetFarmRespawnDelay(id - IdlePolicyService.ZoneInstanceBase)
 				for i in farmSpawn.count:
 					WorldAgent.CreateAgent(farmSpawn, id, farmSpawn.nick)
 			else:

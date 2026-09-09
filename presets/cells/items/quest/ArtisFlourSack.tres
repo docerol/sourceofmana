@@ -8,5 +8,6 @@ script = ExtResource("2_cell")
 slot = 11
 name = "Artis Flour Sack"
 description = "A sack of fine milled flour stamped with the Artis bakery seal."
+tier = 1
 icon = ExtResource("1_sack")
 weight = 50.0

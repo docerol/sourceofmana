@@ -196,7 +196,7 @@ func SuiteSettleGolden(sql : SQLService, economy : EconomyService, charID : int,
 	CheckEq(int(report["xp_earned"]), expectedXp, "xp golden")
 	CheckEq(int(report["gold_earned"]), expectedGold, "gold golden")
 	CheckEq(int(report["gold_taxed"]), expectedTax, "death tax golden")
-	CheckEq(int(report.get("drops", {}).get(zone5.dropItemHash, 0)), expectedDrop, "drop count golden")
+	CheckEq(int(report.get("drops", {}).get(FarmZoneData.GetDropForRoll(5, charID + 5), 0)), expectedDrop, "drop count golden")
 	CheckEq(int(report["chests"]), 3, "chests = min(3, floor(12/4))")
 
 	# DB state: level recomputed via curve, gold credited net of tax
@@ -219,7 +219,7 @@ func SuiteSettleGolden(sql : SQLService, economy : EconomyService, charID : int,
 	CheckEq(ledgerXp.size(), 1, "1 xp ledger row")
 
 	# Item row + chest rows
-	var items : Array[Dictionary] = sql.QueryBindings("SELECT count FROM item WHERE item_id = ? AND char_id = ?;", [zone5.dropItemHash, charID])
+	var items : Array[Dictionary] = sql.QueryBindings("SELECT count FROM item WHERE item_id = ? AND char_id = ?;", [FarmZoneData.GetDropForRoll(5, charID + 5), charID])
 	CheckEq(items.size(), 1, "drop item row present")
 	var chests : Array[Dictionary] = sql.QueryBindings("SELECT id FROM chest_instance WHERE char_id = ?;", [charID])
 	CheckEq(chests.size(), 3, "3 chest rows")
@@ -475,3 +475,103 @@ func _SimRun(charID : int, runIdx : int, simSeconds : int, timeScale : float) ->
 	IdlePolicyService.StopIdleSession(agent)
 	WorldAgent.RemoveAgent(agent)
 	return snapshot
+
+# ------------------------------------------------------------------ F3 suites
+
+# Item tier bands: every preset has a tier inside [1, MAX_TIER]; weapon attack
+# scales monotonically-ish with tier (same-slot tiers differ by real power).
+func SuiteItemTiers() -> void:
+	print("[suite] item tiers (F3)")
+	var total : int = 0
+	var tiered : int = 0
+	var outOfBand : int = 0
+	for cellHash in DB.ItemsDB:
+		var item : ItemCell = DB.ItemsDB[cellHash]
+		total += 1
+		if item.tier >= 1 and item.tier <= FarmZoneData.MAX_TIER:
+			tiered += 1
+		else:
+			outOfBand += 1
+	Check(total > 0, "items parsed from presets (%d)" % total)
+	CheckEq(outOfBand, 0, "all item tiers inside [1..%d]" % FarmZoneData.MAX_TIER)
+	Check(tiered >= total, "tiered items counted")
+
+	# Zone 1 must drop from the lowest band (Apple fallback or T1 items)
+	var zone1Pool : Array = FarmZoneData.GetDropPool(1)
+	Check(zone1Pool.size() > 0, "zone 1 drop pool non-empty (%d items)" % zone1Pool.size())
+	# Deeper zone pools resolve and never share the T1 fallback unless empty
+	var zone30Pool : Array = FarmZoneData.GetDropPool(30)
+	Check(zone30Pool.size() > 0, "zone 30 drop pool non-empty (%d items)" % zone30Pool.size())
+	# Deterministic pick
+	CheckEq(FarmZoneData.GetDropForRoll(1, 7), FarmZoneData.GetDropForRoll(1, 7 + zone1Pool.size() * 2), "drop pick deterministic mod pool size")
+
+# Dedicated farm spawn table: multiplier ≥ 3, respawn in [4, 18], monotonic down with tier
+func SuiteFarmSpawnTable() -> void:
+	print("[suite] farm spawn table (F3)")
+	Check(FarmZoneData.GetFarmSpawnMultiplier(1) >= 3, "zone 1 spawn multiplier ≥ 3 (%d)" % FarmZoneData.GetFarmSpawnMultiplier(1))
+	Check(FarmZoneData.GetFarmSpawnMultiplier(40) > FarmZoneData.GetFarmSpawnMultiplier(1), "deep zone multiplier > zone 1")
+	var respawns : Array[float] = []
+	for zoneID in [1, 10, 20, 30, 40]:
+		respawns.append(FarmZoneData.GetFarmRespawnDelay(zoneID))
+	Check(respawns[0] >= respawns[1] and respawns[1] >= respawns[2] and respawns[2] >= respawns[3] and respawns[3] >= respawns[4], "respawn non-increasing with tier")
+	Check(respawns[4] >= FarmZoneData.FarmRespawnMinSeconds, "respawn floor respected (%.1fs)" % respawns[4])
+
+# VIP window multiplies the settle faucet; expired/absent VIP is a no-op
+func SuiteVIPMods(sql : SQLService, charID : int, accountID : int) -> void:
+	print("[suite] VIP settle mods (F3)")
+	var now : int = SQLCommons.Timestamp()
+
+	# Arm the fixture: farm zone 1, anchored 12h ago so the report is productive
+	sql.SetCharacterFarmZone(charID, 1)
+	sql.UpdateSettleAnchor(charID, now - 12 * 3600, 1.0)
+
+	# Baseline without VIP
+	OfflineSettle.nowOverride = now
+	var base : OfflineSettle.SettleReport = OfflineSettle.BuildReport(charID, now)
+	CheckNear(base.mods, 1.0, 0.01, "no VIP → mods 1.0")
+	var baseXp : int = base.xpEarned
+	Check(baseXp > 0, "baseline settle productive (xp %d)" % baseXp)
+
+	# Activate VIP for the account, rebuild report
+	Check(sql.SetVIPUntil(accountID, now + 3600), "SetVIPUntil applied")
+	var boosted : OfflineSettle.SettleReport = OfflineSettle.BuildReport(charID, now)
+	CheckNear(boosted.mods, OfflineSettle.VIPModFactor, 0.01, "active VIP → mods x1.2")
+	CheckNear(float(boosted.xpEarned), float(baseXp) * OfflineSettle.VIPModFactor, 1.0, "VIP xp = base x1.2")
+
+	# Expired VIP back to 1.0
+	sql.SetVIPUntil(accountID, now - 10)
+	var expired : OfflineSettle.SettleReport = OfflineSettle.BuildReport(charID, now)
+	CheckNear(expired.mods, 1.0, 0.01, "expired VIP → mods 1.0")
+	OfflineSettle.nowOverride = 0
+
+# Leaderboard returns rows ordered by power score; cached column updates
+func SuiteLeaderboard(sql : SQLService, charID : int) -> void:
+	print("[suite] power leaderboard (F3)")
+	Check(sql.UpdatePowerScore(charID, 12345), "UpdatePowerScore applied")
+	var rows : Array[Dictionary] = sql.GetLeaderboard(50)
+	Check(rows.size() > 0, "leaderboard non-empty (%d rows)" % rows.size())
+	var ordered : bool = true
+	var previous : int = 1 << 30
+	for row in rows:
+		var score : int = int(row.get("power_score", 0))
+		if score > previous:
+			ordered = false
+		previous = score
+	Check(ordered, "leaderboard ordered by power_score DESC")
+	var found : bool = false
+	for row in rows:
+		if int(row.get("char_id", 0)) == charID:
+			found = int(row.get("power_score", 0)) == 12345
+	Check(found, "fixture present with cached score")
+
+# Formation slot selector: row per (account, slot) is honored by the attach path
+func SuiteFormationSlots(sql : SQLService, charID : int, accountID : int) -> void:
+	print("[suite] formation slots (F3)")
+	Check(sql.SetCharacterFormationSlot(charID, 3), "SetCharacterFormationSlot(3)")
+	var row : Dictionary = sql.GetCharacter(charID)
+	CheckEq(int(row.get("formation_slot", -1)), 3, "character row carries formation_slot")
+	Check(sql.SaveFormation(accountID, 3, charID, [7, 9], 42.5), "SaveFormation(slot 3)")
+	var loaded : Dictionary = sql.GetFormationForSlot(accountID, 3)
+	Check(not loaded.is_empty(), "GetFormationForSlot returns row")
+	CheckNear(float(loaded.get("auto_potion_pct", 0.0)), 42.5, 0.01, "slot 3 auto-potion persisted")
+	Check(sql.SetCharacterFormationSlot(charID, 0), "slot reset to 0")

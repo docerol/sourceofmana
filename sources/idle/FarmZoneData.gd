@@ -19,6 +19,20 @@ const ParPerZoneSeconds : float = 0.25
 # Tier pacing (power score gates; F2 stores them, F3/F4 enforce soft gating)
 const TierPowerStep : int = 30
 
+# SOM-IDLE: F3 — dedicated farm spawn table (TECH_SPEC_CORE §2, spike report §5.3).
+# Farm instances stop copying the adventure-map spawn density: each zone scales
+# its own map spawns to feed the pacing par, with tier-scaled respawn.
+# multiplier = 2 + tier (t1 → 3x, t8 → 10x base group counts)
+# respawn    = 18s - 2s*tier clamped to [4s, 16s] (t1 → 16s, t8 → 4s)
+const FarmSpawnBaseMultiplier : int = 2
+const FarmRespawnBaseSeconds : float = 18.0
+const FarmRespawnStepSeconds : float = 2.0
+const FarmRespawnMinSeconds : float = 4.0
+
+# SOM-IDLE: F3 — item tier bands (ItemCell.tier 1..8). A zone drops items from
+# its own tier band [tier, min(tier+1, 8)]; empty pools fall back to the Apple.
+const DropTierBandSize : int = 2
+
 # Spike drop catalog: zone 1 loots Apple (health potion) at 150 ppm ≈ 540/h
 const DefaultDropItemHash : int = 215387671		# Apple
 const DefaultDropRatePPM : int = 150
@@ -155,3 +169,66 @@ static func SyncWithDB():
 				data.mapID = _resolveMapID(data.mapName)
 				if data.mapID != DB.UnknownHash:
 					_mapIndex[data.mapID] = data.id
+
+# ------------------------------------------------------------------ F3: dedicated farm spawn table
+
+# Density multiplier applied to every spawn group of the zone's own map when
+# the dedicated farm instance is populated (WorldInstance._map_loaded).
+static func GetFarmSpawnMultiplier(zoneID : int) -> int:
+	var zone : FarmZoneData = GetZone(zoneID)
+	return FarmSpawnBaseMultiplier + (zone.tier if zone else 1)
+
+# Respawn delay for farm-instance mobs (seconds) — tier-scaled: deeper zones
+# replenish faster because mob kills are slower and walks are longer.
+static func GetFarmRespawnDelay(zoneID : int) -> float:
+	var zone : FarmZoneData = GetZone(zoneID)
+	var tier : int = zone.tier if zone else 1
+	return clampf(FarmRespawnBaseSeconds - FarmRespawnStepSeconds * float(tier), FarmRespawnMinSeconds, FarmRespawnBaseSeconds)
+
+# ------------------------------------------------------------------ F3: tier-banded drop pools
+
+static var _dropPoolCache : Dictionary[int, Array] = {}
+
+# Item hashes whose tier falls inside the zone's band [tier, tier+band-1].
+# Deterministic order (hash ascending) so rolls are reproducible.
+static func GetDropPool(zoneID : int) -> Array:
+	_build()
+	var pool : Array = _dropPoolCache.get(zoneID, [])
+	if not pool.is_empty():
+		return pool
+
+	var zone : FarmZoneData = GetZone(zoneID)
+	if zone == null:
+		return [DefaultDropItemHash]
+
+	var tierMax : int = mini(zone.tier + DropTierBandSize - 1, MAX_TIER)
+	var candidates : Array[int] = []
+	for cellHash in DB.ItemsDB:
+		var item : ItemCell = DB.ItemsDB[cellHash]
+		if item != null and item.tier >= zone.tier and item.tier <= tierMax:
+			candidates.append(cellHash)
+	candidates.sort()
+
+	if candidates.is_empty():
+		# Band empty (early tiers have few items): fall one tier down, then Apple
+		for fallbackTier in range(zone.tier - 1, 0, -1):
+			for cellHash in DB.ItemsDB:
+				var item : ItemCell = DB.ItemsDB[cellHash]
+				if item != null and item.tier == fallbackTier:
+					candidates.append(cellHash)
+			if not candidates.is_empty():
+				candidates.sort()
+				break
+		if candidates.is_empty():
+			candidates = [DefaultDropItemHash]
+
+	_dropPoolCache[zoneID] = candidates
+	return candidates
+
+# Deterministic pick for a zone drop roll (caller supplies a stable roll input)
+static func GetDropForRoll(zoneID : int, roll : int) -> int:
+	var pool : Array = GetDropPool(zoneID)
+	return pool[roll % pool.size()] if not pool.is_empty() else DefaultDropItemHash
+
+static func InvalidateDropPools():
+	_dropPoolCache.clear()

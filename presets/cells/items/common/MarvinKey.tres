@@ -8,6 +8,7 @@ script = ExtResource("1_x3n2t")
 id = 1975170517
 name = "Marvin's Key"
 description = "A key that has been hidden a long time ago, seems to open a fancy door."
+tier = 1
 icon = ExtResource("1_xrqfe")
 weight = 15.0
 stackable = true

@@ -19,6 +19,7 @@ script = ExtResource("1_66yfp")
 id = 215387671
 name = "Apple"
 description = "A crisp red apple known for its refreshing taste and vitality-boosting properties."
+tier = 1
 icon = ExtResource("1_cplo6")
 weight = 5.0
 stackable = true

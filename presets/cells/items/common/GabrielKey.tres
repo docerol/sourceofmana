@@ -8,6 +8,7 @@ script = ExtResource("1_buwtk")
 id = 2961268734
 name = "Gabriel's Key"
 description = "A key that has been hidden a long time ago, seems to open a fancy door."
+tier = 1
 icon = ExtResource("1_kr3ik")
 weight = 15.0
 stackable = true

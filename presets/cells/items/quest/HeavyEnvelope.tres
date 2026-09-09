@@ -8,5 +8,6 @@ script = ExtResource("2_6b5vw")
 slot = 11
 name = "Heavy Envelope"
 description = "A heavy envelope that feels like it contains more than just paper."
+tier = 1
 icon = ExtResource("1_jk2eh")
 weight = 25.0

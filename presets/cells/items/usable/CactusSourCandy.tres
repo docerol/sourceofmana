@@ -24,6 +24,7 @@ _modifiers = Array[ExtResource("2_4rutc")]([SubResource("Resource_y0bgm"), SubRe
 script = ExtResource("4_0tnm7")
 id = 3589756736
 name = "Cactus Sour Candy"
+tier = 3
 icon = ExtResource("1_8ctvb")
 weight = 5.0
 stackable = true

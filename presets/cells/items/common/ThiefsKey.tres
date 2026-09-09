@@ -9,6 +9,7 @@ slot = 11
 id = 1577372888
 name = "Thief's Key"
 description = "A tarnished key found in the snake pit."
+tier = 1
 icon = ExtResource("1_epkb0")
 weight = 15.0
 stackable = true

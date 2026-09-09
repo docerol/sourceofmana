@@ -24,6 +24,7 @@ _modifiers = Array[ExtResource("2_w5vmb")]([SubResource("Resource_y0bgm"), SubRe
 script = ExtResource("4_1ohq4")
 id = 30320795
 name = "Croissant"
+tier = 3
 icon = ExtResource("1_mucoc")
 weight = 5.0
 stackable = true

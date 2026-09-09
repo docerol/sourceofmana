@@ -8,6 +8,7 @@ script = ExtResource("1_8iaus")
 id = 3151885029
 name = "Dorian's Key"
 description = "A key that has been hidden a long time ago, seems to open a fancy door."
+tier = 1
 icon = ExtResource("1_bfqgm")
 weight = 15.0
 stackable = true

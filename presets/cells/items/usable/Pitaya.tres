@@ -19,6 +19,7 @@ script = ExtResource("4_ckwuv")
 id = 3391687821
 name = "Pitaya"
 description = "A refreshing cactus fruit."
+tier = 1
 icon = ExtResource("1_ml7mk")
 weight = 5.0
 stackable = true

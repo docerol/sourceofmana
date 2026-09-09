@@ -9,6 +9,7 @@ slot = 11
 id = 0
 name = "Chest Mine Key"
 description = "A rusty key found in the abandoned mine."
+tier = 1
 icon = ExtResource("1_epkb0")
 weight = 15.0
 stackable = true

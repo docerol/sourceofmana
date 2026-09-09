@@ -9,5 +9,6 @@ script = ExtResource("2_script")
 shader = ExtResource("3_palette")
 name = "Bone"
 description = "A bone from a humanoid skeleton."
+tier = 1
 icon = ExtResource("1_icon")
 stackable = true

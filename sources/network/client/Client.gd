@@ -334,6 +334,31 @@ func SeasonPassState(state : Dictionary, _peerID : int):
 	if Launcher.GUI and bool(state.get("active", false)):
 		Launcher.GUI.notificationLabel.AddNotification("Season pass active")
 
+# SOM-IDLE: F3 — leaderboard and VIP status surfaced as notifications (F2 convention)
+func Leaderboard(entries : Array, _peerID : int):
+	if not Launcher.GUI:
+		return
+	if entries.is_empty():
+		Launcher.GUI.notificationLabel.AddNotification("Leaderboard: empty")
+		return
+	var lines : PackedStringArray = PackedStringArray()
+	lines.append("Power leaderboard:")
+	var rank : int = 1
+	for entry in entries:
+		if rank > 10:
+			break
+		lines.append("#%d %s — L%d power %d" % [rank, str(entry.get("nickname", "?")), int(entry.get("level", 0) if entry.get("level", 0) != null else 0), int(entry.get("power_score", 0) if entry.get("power_score", 0) != null else 0)])
+		rank += 1
+	Launcher.GUI.notificationLabel.AddNotification("\n".join(lines))
+
+func VIPState(state : Dictionary, _peerID : int):
+	if not Launcher.GUI:
+		return
+	if bool(state.get("active", false)):
+		Launcher.GUI.notificationLabel.AddNotification("VIP active (idle faucet x%.1f)" % float(state.get("mods", 1.0)))
+	else:
+		Launcher.GUI.notificationLabel.AddNotification("VIP inactive")
+
 func RefreshOnlineList(players : PackedStringArray, _peerID : int):
 	if Launcher.GUI:
 		Launcher.GUI.socialWindow.RefreshOnline(players)

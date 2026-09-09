@@ -195,6 +195,8 @@ func ConnectCharacter(nickname : String, peerID : int):
 					peer.SetAgent(agent.get_rid().get_id())
 					agent.SetCharacterInfo(charInfo, peer.characterID)
 					Launcher.SQL.CharacterLogin(peer.characterID)
+					# SOM-IDLE: F3 — seed the cached power score on every connect
+					Launcher.SQL.UpdatePowerScore(peer.characterID, Formula.GetPowerScore(agent.stat))
 
 					var ip : String = Peers.GetPeerIP(peerID)
 					Util.PrintLog("Server", "Player connected: %s (%d) via %s from %s" % [nickname, peerID, Peers.GetTransportName(Peers.GetTransport(peerID)), ip if not ip.is_empty() else "unavailable"])
@@ -217,6 +219,9 @@ func DisconnectCharacter(peerID : int):
 				Launcher.SQL.PersistSessionEfficiency(peer.characterID, player.idlePolicy.ComputeSessionEfficiency())
 				player.idlePolicy.Halt()
 				player.idlePolicy = null
+
+			# SOM-IDLE: F3 — cache the live power score for the offline leaderboard
+			Launcher.SQL.UpdatePowerScore(peer.characterID, Formula.GetPowerScore(player.stat))
 
 			Launcher.SQL.RefreshCharacter(player)
 			WorldAgent.RemoveAgent(player)
@@ -290,6 +295,29 @@ func GetAFKReport(peerID : int):
 func GetSeasonPass(peerID : int):
 	# Spike stub: season pass mods are pinned to 1.0 (F3/F4 scope)
 	Network.SeasonPassState({"active": false, "mods": 1.0}, peerID)
+
+# SOM-IDLE: F3 — VIP window state for the requesting account
+func GetVIPState(peerID : int):
+	var accountID : int = Peers.GetAccount(peerID)
+	if accountID == NetworkCommons.PeerUnknownID:
+		Network.VIPState({"active": false, "until": 0}, peerID)
+		return
+	var until : int = Launcher.SQL.GetVIPUntil(accountID)
+	var now : int = SQLCommons.Timestamp()
+	Network.VIPState({"active": until > now, "until": until, "mods": OfflineSettle.VIPModFactor if until > now else 1.0}, peerID)
+
+# SOM-IDLE: F3 — global power-score leaderboard (cached column, offline-friendly)
+func GetLeaderboard(peerID : int):
+	Network.Leaderboard(Launcher.SQL.GetLeaderboard(50), peerID)
+
+# SOM-IDLE: F3 — active formation slot selector (0..MaxFormationSlots-1)
+func SetFormationSlot(slot : int, peerID : int):
+	var charID : int = Peers.GetCharacter(peerID)
+	if charID == NetworkCommons.PeerUnknownID or slot < 0 or slot >= IdlePolicyService.MaxFormationSlots:
+		Network.FarmZoneFeedback(0, false, "invalid_formation_slot", peerID)
+		return
+	Launcher.SQL.SetCharacterFormationSlot(charID, slot)
+	Network.FarmZoneFeedback(0, true, "formation_slot_saved", peerID)
 
 func CharacterListing(peerID : int):
 	var err : NetworkCommons.CharacterError = NetworkCommons.CharacterError.ERR_OK

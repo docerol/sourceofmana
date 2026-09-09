@@ -20,6 +20,7 @@ script = ExtResource("4_ckwuv")
 id = 3878004993
 name = "Cactus Potion"
 description = "A potent healing potion brewed from cactus extract."
+tier = 5
 icon = ExtResource("1_ml7mk")
 weight = 5.0
 stackable = true

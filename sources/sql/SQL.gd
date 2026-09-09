@@ -274,16 +274,20 @@ func AddChestInstance(charID : int, chestHash : int, origin : String) -> bool:
 
 # SOM-IDLE: F2 formations — loadout + auto-potion per account slot
 func SaveFormation(accountID : int, slot : int, charID : int, skillLoadout : Array[int], autoPotionPct : float) -> bool:
-	var data : Dictionary = {
+	var loadout : String = var_to_str(skillLoadout)
+	# NOTE: update_rows reports success even when no row matched, so an
+	# update-or-insert chain short-circuits and silently writes nothing (F3 fix).
+	if GetFormationForSlot(accountID, slot).is_empty():
+		return db.insert_row("formation", {
+			"account_id" = accountID,
+			"slot" = slot,
+			"char_id" = charID,
+			"skill_loadout" = loadout,
+			"auto_potion_pct" = autoPotionPct,
+		})
+	return db.update_rows("formation", "account_id = %d AND slot = %d" % [accountID, slot], {
 		"char_id" = charID,
-		"skill_loadout" = var_to_str(skillLoadout),
-		"auto_potion_pct" = autoPotionPct,
-	}
-	return db.update_rows("formation", "account_id = %d AND slot = %d;" % [accountID, slot], data) or db.insert_row("formation", {
-		"account_id" = accountID,
-		"slot" = slot,
-		"char_id" = charID,
-		"skill_loadout" = var_to_str(skillLoadout),
+		"skill_loadout" = loadout,
 		"auto_potion_pct" = autoPotionPct,
 	})
 
@@ -303,6 +307,33 @@ func PersistSessionEfficiency(charID : int, efficiency : float) -> bool:
 func GetAccountIDForCharacter(charID : int) -> int:
 	var rows : Array[Dictionary] = QueryBindings("SELECT account_id FROM character WHERE char_id = ?;", [charID])
 	return int(rows[0]["account_id"]) if not rows.is_empty() else NetworkCommons.PeerUnknownID
+
+# SOM-IDLE: F3 — formation slot selector (multiple loadouts per account)
+func GetFormationForSlot(accountID : int, slot : int) -> Dictionary:
+	var rows : Array[Dictionary] = QueryBindings("SELECT * FROM formation WHERE account_id = ? AND slot = ?;", [accountID, slot])
+	return {} if rows.is_empty() else rows[0]
+
+func SetCharacterFormationSlot(charID : int, slot : int) -> bool:
+	return db.update_rows("character", "char_id = %d" % charID, {"formation_slot" = slot})
+
+# SOM-IDLE: F3 — VIP window (MONETIZATION §2.2: +20% idle faucet while active)
+func GetVIPUntil(accountID : int) -> int:
+	var rows : Array[Dictionary] = QueryBindings("SELECT vip_until FROM account WHERE account_id = ?;", [accountID])
+	var value : Variant = rows[0].get("vip_until", 0) if not rows.is_empty() else 0
+	return 0 if value == null else int(value)
+
+func SetVIPUntil(accountID : int, untilTimestamp : int) -> bool:
+	return db.update_rows("account", "account_id = %d" % accountID, {"vip_until" = untilTimestamp})
+
+# SOM-IDLE: F3 — cached power score for the offline leaderboard
+func UpdatePowerScore(charID : int, score : int) -> bool:
+	return db.update_rows("character", "char_id = %d" % charID, {"power_score" = score})
+
+func GetLeaderboard(limit : int = 50) -> Array[Dictionary]:
+	return QueryBindings("SELECT c.char_id, c.nickname, s.level, c.power_score, a.username \
+FROM character AS c INNER JOIN account AS a ON c.account_id = a.account_id \
+INNER JOIN stat AS s ON s.char_id = c.char_id \
+ORDER BY c.power_score DESC, c.char_id ASC LIMIT ?;", [limit])
 
 func UpdateStat(charID : int, stats : ActorStats) -> bool:
 	if stats == null:

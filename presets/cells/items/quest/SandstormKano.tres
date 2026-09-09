@@ -8,4 +8,5 @@ script = ExtResource("2_mv1ba")
 slot = 11
 name = "Sandstorm Kano"
 description = "A Mana Seed retrieved in a mine from Tonori's region directly from a livin Uru."
+tier = 1
 icon = ExtResource("1_jdgf4")

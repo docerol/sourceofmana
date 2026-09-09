@@ -31,6 +31,7 @@ textures = Array[Texture2D]([ExtResource("3_bjf14"), ExtResource("4_30krm"), Ext
 shader = ExtResource("3_hsd0w")
 id = 3383004529
 name = "Leather Boots"
+tier = 1
 icon = ExtResource("1_44ei4")
 weight = 300.0
 modifiers = SubResource("Resource_u2eud")

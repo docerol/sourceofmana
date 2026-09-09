@@ -389,6 +389,27 @@ func FarmZoneFeedback(zoneID : int, ok : bool, reason : String, peerID : int = N
 func SeasonPassState(state : Dictionary, peerID : int = NetworkCommons.PeerOfflineID):
 	CallClient("SeasonPassState", [state], peerID)
 
+# SOM-IDLE: F3 — VIP state, power leaderboard, formation slot selector
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func GetVIPState(peerID : int = NetworkCommons.PeerAuthorityID):
+	CallServer("GetVIPState", [], peerID, NetworkCommons.DelayConfig)
+
+@rpc("authority", "call_remote", "reliable", EChannel.ACTION)
+func VIPState(state : Dictionary, peerID : int = NetworkCommons.PeerOfflineID):
+	CallClient("VIPState", [state], peerID)
+
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func GetLeaderboard(peerID : int = NetworkCommons.PeerAuthorityID):
+	CallServer("GetLeaderboard", [], peerID, NetworkCommons.DelayMinute)
+
+@rpc("authority", "call_remote", "reliable", EChannel.ACTION)
+func Leaderboard(entries : Array, peerID : int = NetworkCommons.PeerOfflineID):
+	CallClient("Leaderboard", [entries], peerID)
+
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func SetFormationSlot(slot : int, peerID : int = NetworkCommons.PeerAuthorityID):
+	CallServer("SetFormationSlot", [slot], peerID, NetworkCommons.DelayConfig)
+
 # Inventory
 @rpc("authority", "call_remote", "reliable", EChannel.ENTITY)
 func ItemAdded(itemID : int, customfield : StringName, count : int, peerID : int = NetworkCommons.PeerOfflineID):

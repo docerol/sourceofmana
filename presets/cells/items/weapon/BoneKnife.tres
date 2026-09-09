@@ -31,6 +31,7 @@ shader = ExtResource("3_uxtf6")
 id = 4119861718
 name = "Bone Knife"
 description = "A knife made from bones. Quite effective."
+tier = 4
 icon = ExtResource("1_uvles")
 weight = 400.0
 modifiers = SubResource("Resource_snree")

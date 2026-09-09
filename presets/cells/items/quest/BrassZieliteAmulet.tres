@@ -9,6 +9,7 @@ slot = 11
 id = 0
 name = "Brass Zielite Amulet"
 description = "A Zielite Amulet with a brass setting and chain. The stone slightly glows, showing the natural flow of Mana around it."
+tier = 1
 icon = ExtResource("1_icon")
 weight = 50.0
 metadata/enables_magic = true

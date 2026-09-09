@@ -3,6 +3,7 @@ extends BaseCell
 class_name ItemCell
 
 @export var slot : ActorCommons.Slot			= ActorCommons.Slot.NONE
+@export var tier : int							= 1
 @export var textures : Array[Texture2D]			= []
 @export var shader : Resource					= null
 @export var customfield : String				= ""

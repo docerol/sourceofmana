@@ -14,12 +14,15 @@ const ChestHoursPerChest : int = 4
 const EfficiencyDecayPerDeath : float = 0.05
 const MinEfficiency : float = 0.5
 
-# Mods (VIP/season pass/potion) are F3/F4 scope: spike pins them to 1.0
-const Mods : float = 1.0
+# SOM-IDLE: F3 — settle mods (TECH_SPEC_CORE §3; MONETIZATION §2.2). VIP active
+# window multiplies the offline faucet by +20%; guild hook stays at 1.0 (F4).
+const VIPModFactor : float = 1.2
+const GuildHookFactor : float = 1.0
 
 #
 class SettleReport:
 	var charID : int = 0
+	var accountID : int = 0
 	var zoneID : int = 0
 	var hours : float = 0.0
 	var efficiency : float = 1.0
@@ -32,10 +35,12 @@ class SettleReport:
 	var drops : Dictionary[int, int] = {}
 	var chests : int = 0
 	var lastSettledAt : int = 0
+	var mods : float = 1.0
 
 	func to_dictionary() -> Dictionary:
 		return {
 			"char_id": charID,
+			"account_id": accountID,
 			"zone_id": zoneID,
 			"hours": hours,
 			"efficiency": efficiency,
@@ -48,6 +53,7 @@ class SettleReport:
 			"drops": drops,
 			"chests": chests,
 			"last_settled_at": lastSettledAt,
+			"mods": mods,
 		}
 
 # Test seams (headless `-s` runs have no Launcher/SQL autoload context)
@@ -77,6 +83,7 @@ static func BuildReport(charID : int, now : int = 0) -> SettleReport:
 
 	var elapsed : int = (now if now > 0 else _now()) - int(char.get("last_settled_at", 0) if char.get("last_settled_at", 0) != null else 0)
 	report.charID = charID
+	report.accountID = _statInt(char, "account_id", 0)
 	report.zoneID = _statInt(char, "farm_zone", 0)
 	report.lastSettledAt = _statInt(char, "last_settled_at", 0)
 	report.hours = minf(float(elapsed) / 3600.0, BaseCapHours)
@@ -104,6 +111,7 @@ static func SettlePending(charID : int) -> Dictionary:
 
 	var report : SettleReport = SettleReport.new()
 	report.charID = charID
+	report.accountID = _statInt(char, "account_id", 0)
 	report.zoneID = zoneID
 	report.lastSettledAt = now
 	report.hours = minf(float(now - lastSettled) / 3600.0, BaseCapHours)
@@ -118,6 +126,17 @@ static func SettlePending(charID : int) -> Dictionary:
 
 # ------------------------------------------------------------------ formula
 
+# SOM-IDLE: F3 — settle mods by account: VIP window (+20% idle faucet),
+# guild hook reserved (F4). Kept as a pure function for test seams.
+static func GetModsForAccount(accountID : int, now : int = 0) -> float:
+	var mods : float = GuildHookFactor
+	if accountID > 0 and now > 0:
+		var sql : SQLService = _sql()
+		var vipUntil : int = sql.GetVIPUntil(accountID)
+		if vipUntil > now:
+			mods *= VIPModFactor
+	return mods
+
 static func _ApplyFormula(sql : SQLService, report : SettleReport):
 	var zone : FarmZoneData = FarmZoneData.GetZone(report.zoneID)
 	if zone == null:
@@ -126,8 +145,9 @@ static func _ApplyFormula(sql : SQLService, report : SettleReport):
 	var h : float = report.hours
 	var eff : float = report.efficiency
 
-	report.xpEarned = roundi(float(zone.xpPerKill) * float(zone.parKillsPerHour) * h * eff * OfflineFactor * Mods)
-	report.goldEarned = roundi(float(zone.goldPerKill) * float(zone.parKillsPerHour) * h * eff * OfflineFactor * Mods)
+	report.mods = GetModsForAccount(report.accountID, _now())
+	report.xpEarned = roundi(float(zone.xpPerKill) * float(zone.parKillsPerHour) * h * eff * OfflineFactor * report.mods)
+	report.goldEarned = roundi(float(zone.goldPerKill) * float(zone.parKillsPerHour) * h * eff * OfflineFactor * report.mods)
 	if eff < 1.0:
 		report.goldTaxed = roundi(float(report.goldEarned) * float(DeathTaxPct) / 100.0)
 
@@ -139,7 +159,9 @@ static func _ApplyFormula(sql : SQLService, report : SettleReport):
 	if frac >= 0.5:
 		dropCount += 1
 	if dropCount > 0:
-		report.drops[zone.dropItemHash] = dropCount
+		# SOM-IDLE: F3 — tier-banded drop pool (deterministic pick per char+zone)
+		var itemHash : int = FarmZoneData.GetDropForRoll(report.zoneID, report.charID + report.zoneID)
+		report.drops[itemHash] = dropCount
 
 	report.chests = mini(floori(h / float(ChestHoursPerChest)), MaxChests)
 

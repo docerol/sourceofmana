@@ -22,6 +22,7 @@ script = ExtResource("4_6ukje")
 id = 3288439794
 name = "Water Bottle"
 description = "A simple bottle filled with clear water."
+tier = 1
 icon = ExtResource("1_fl4k2")
 weight = 50.0
 stackable = true
