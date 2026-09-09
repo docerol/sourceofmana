@@ -41,7 +41,7 @@ body:
     attributes:
       label: Version and environment
       description: |
-        What version of Source of Mana are you using and on what kind of device?
+        What version of Shambleta are you using and on what kind of device?
         If you are using an unreleased version, specify the commit you are on.
       placeholder: |
         - OS: Windows 11, macOS, Ubuntu, Linux Mint, Android 15

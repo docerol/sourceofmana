@@ -110,7 +110,7 @@ func OpenDiscord():
 
 func DisplayFirstLogin():
 	if LauncherCommons.isWeb:
-		UICommons.MessageBox("""Welcome to Source of Mana!
+		UICommons.MessageBox("""Welcome to Shambleta!
 
 You're currently playing the web version, which may run slower and isn't as stable as the downloadable versions.
 
@@ -120,7 +120,7 @@ For the best experience, we recommend using the native client found on our itch.
 			settingsWindow.set_sessionfirstlogin.bind(false), "OK",
 			OpenDiscord, "Join our Discord")
 	else:
-		UICommons.MessageBox("""Welcome to Source of Mana!
+		UICommons.MessageBox("""Welcome to Shambleta!
 
 This is an open-source MMORPG and still a work in progress. You're welcome to explore, test, and enjoy the current features.
 

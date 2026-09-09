@@ -6,7 +6,7 @@ on:
 
 env:
   GODOT_VERSION: 4.7.1
-  EXPORT_NAME: "Source of Mana"
+  EXPORT_NAME: "Shambleta"
   PROJECT_PATH: "."
 
 jobs:

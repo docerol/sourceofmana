@@ -50,7 +50,7 @@ body:
         **If you are even slightly unsure whether or not the version might be relevant
         to this feature request, still input it below. Added context never hurts.**
 
-        What version of Source of Mana are you using and on what kind of device?
+        What version of Shambleta are you using and on what kind of device?
         If you are using an unreleased version, specify the commit you are on.
       placeholder: |
         - OS: Windows 11, macOS, Ubuntu, Linux Mint, Android 15

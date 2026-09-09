@@ -1,4 +1,4 @@
-# Contributing to Source of Mana
+# Contributing to Shambleta
 
 Thanks for wanting to help. Come [chat with us](README.md#community--contribution) before starting anything bigger than a trivial fix, so your work fits the plan and doesn't go to waste.
 

@@ -1,8 +1,8 @@
-# Source of Mana
+# Shambleta
 
 ![screenshot](data/press/readme/header.png)
 
-**Source of Mana** is a classic 2D MMORPG inspired by the golden era of pixel art RPGs. This game project is truly open source and welcomes contributions from around the globe.
+**Shambleta** is a classic 2D MMORPG inspired by the golden era of pixel art RPGs. This game project is truly open source and welcomes contributions from around the globe.
 
 The game is still in early development but already offers a playable solo and multiplayer experience.
 
@@ -14,9 +14,7 @@ The game is still in early development but already offers a playable solo and mu
 - Game editor: [Godot 4.7.1](https://godotengine.org/)
 - Level editor: [Tiled 1.11.2](https://www.mapeditor.org/)
 
-**Organization:** [Manasource](https://manasource.org)
-
-**Origins:** We are veterans of *The Mana World*, building upon and improving its assets
+**Origins:** A fork of [Source of Mana](https://github.com/docerol/sourceofmana) — itself built by veterans of *The Mana World*, improving upon its assets. Shambleta carries that lineage forward as its own game.
 
 **Goal:** Become the go-to open source 2D MMORPG project
 
@@ -97,4 +95,4 @@ For detailed information on the licensing of code, assets, and design, as well a
 
 ---
 
-Source of Mana is developed by volunteers in their free time. If you like retro RPGs & MMORPGs and want to help shape the future of open-source gaming, come say hi!
+Shambleta is developed by volunteers in their free time. If you like retro RPGs & MMORPGs and want to help shape the future of open-source gaming, come say hi!

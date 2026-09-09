@@ -18,14 +18,14 @@ runs:
         mkdir -p "${{ inputs.output-dir }}"
         OUT="$(cd "${{ inputs.output-dir }}" && pwd)"
 
-        mv "$SRC/Linux" "$SRC/Source of Mana - Linux"
-        tar -czf "$OUT/Source of Mana - Linux.tar.gz" -C "$SRC" "Source of Mana - Linux"
+        mv "$SRC/Linux" "$SRC/Shambleta - Linux"
+        tar -czf "$OUT/Shambleta - Linux.tar.gz" -C "$SRC" "Shambleta - Linux"
 
-        mv "$SRC/Linux (Headless Server)" "$SRC/Source of Mana - Linux Server"
-        tar -czf "$OUT/Source of Mana - Linux Server.tar.gz" -C "$SRC" "Source of Mana - Linux Server"
+        mv "$SRC/Linux (Headless Server)" "$SRC/Shambleta - Linux Server"
+        tar -czf "$OUT/Shambleta - Linux Server.tar.gz" -C "$SRC" "Shambleta - Linux Server"
 
-        mv "$SRC/Windows" "$SRC/Source of Mana - Windows"
-        ( cd "$SRC" && zip -r "$OUT/Source of Mana - Windows.zip" "Source of Mana - Windows" )
+        mv "$SRC/Windows" "$SRC/Shambleta - Windows"
+        ( cd "$SRC" && zip -r "$OUT/Shambleta - Windows.zip" "Shambleta - Windows" )
 
-        cp "$SRC"/macOS/*.zip "$OUT/Source of Mana - macOS.zip"
-        cp "$SRC"/Android/*.apk "$OUT/Source of Mana - Android.apk"
+        cp "$SRC"/macOS/*.zip "$OUT/Shambleta - macOS.zip"
+        cp "$SRC"/Android/*.apk "$OUT/Shambleta - Android.apk"

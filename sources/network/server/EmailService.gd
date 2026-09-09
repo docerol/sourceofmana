@@ -20,7 +20,7 @@ func _ready():
 	senderName = Conf.GetString("Email", "Email-SenderName", Conf.Type.CREDENTIAL)
 	senderEmail = Conf.GetString("Email", "Email-SenderAddress", Conf.Type.CREDENTIAL)
 	if senderName.is_empty():
-		senderName = "Source of Mana"
+		senderName = "Shambleta"
 	passwordResetTemplate = FileSystem.LoadFile(PasswordResetTemplatePath)
 	httpRequest = HTTPRequest.new()
 	add_child(httpRequest)

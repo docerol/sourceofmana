@@ -10,11 +10,11 @@ config_version=5
 
 [application]
 
-config/name="Source of Mana"
+config/name="Shambleta"
 config/version="0.0.9"
 run/main_scene="res://presets/Default.tscn"
 config/use_custom_user_dir=true
-config/custom_user_dir_name="SourceOfMana"
+config/custom_user_dir_name="Shambleta"
 config/features=PackedStringArray("4.7")
 run/flush_stdout_on_print=true
 run/max_fps=60
