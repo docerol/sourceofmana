@@ -57,16 +57,19 @@ var progressTimer : Timer						= null
 
 #
 func CloseWindow():
-	if FSM.IsLoginState():
-		loginPanel.Close()
-	elif FSM.IsCharacterState():
-		characterPanel.Close()
-	elif FSM.IsGameState():
-		ToggleControl(quitWindow)
+	match FSM.currentState:
+		FSM.States.LOGIN_SCREEN, FSM.States.LOGIN_PROGRESS:
+			loginPanel.Close()
+		FSM.States.CHAR_SCREEN, FSM.States.CHAR_PROGRESS:
+			characterPanel.Close()
+		FSM.States.IN_GAME:
+			ToggleControl(quitWindow)
 
 func GetCurrentWindow() -> Control:
-	if windows && windows.get_child_count() > 0:
-		return windows.get_child(windows.get_child_count() - 1)
+	if windows:
+		var windowsCount : int = windows.get_child_count()
+		if windowsCount > 0:
+			return windows.get_child(windowsCount - 1)
 	return null
 
 func CloseCurrent():

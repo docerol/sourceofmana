@@ -266,6 +266,10 @@ func save_sessionoverlay():
 			if window.is_visible() and window.saveOverlayState:
 				overlay.append([window.get_name().get_file(), window.get_position(), window.get_size()])
 		set_sessionoverlay(overlay)
+func reset_sessionoverlay():
+	if Launcher.GUI and Launcher.GUI.windows:
+		Launcher.GUI.windows.ResetWindowsLayout()
+		save_sessionoverlay()
 func set_sessionoverlay(overlay : Array):
 	SetVal("Session-Overlay", overlay)
 	apply_sessionoverlay(overlay)
@@ -294,36 +298,33 @@ func load_shortcutcells():
 func save_shortcutcells():
 	var cells : Array = []
 	if Launcher.GUI:
-		for tile in Launcher.GUI.get_tree().get_nodes_in_group("CellTile"):
-			if tile and tile.is_visible() and tile.draggable and tile.cell:
+		for tile in Launcher.GUI.shortcutTiles:
+			if tile.is_visible() and tile.cell:
 				cells.append([tile.name, tile.cell.id, tile.cell.type])
 		set_shortcutcells(cells)
 func set_shortcutcells(cells : Array):
 	SetVal("Session-ShortcutCells", cells)
 func apply_shortcutcells(cells : Array):
-	if Launcher.GUI and Launcher.GUI:
-		for tile in Launcher.GUI.get_tree().get_nodes_in_group("CellTile"):
+	if Launcher.GUI:
+		var tiles : Array[CellTile] = Launcher.GUI.shortcutTiles
+		for tile in tiles:
 			if cells.is_empty():
 				break
-			if tile and tile.draggable:
-				for cellInfo in cells:
-					if cellInfo and cellInfo is Array and cellInfo.size() >= 3 and cellInfo[0] == tile.name:
-						var cell : BaseCell = null
-						match cellInfo[2]:
-							CellCommons.Type.ITEM:
-								if DB.ItemsDB.has(cellInfo[1]):
-									cell = DB.ItemsDB[cellInfo[1]]
-							CellCommons.Type.EMOTE:
-								if DB.EmotesDB.has(cellInfo[1]):
-									cell = DB.EmotesDB[cellInfo[1]]
-							CellCommons.Type.SKILL:
-								if DB.SkillsDB.has(cellInfo[1]):
-									cell = DB.SkillsDB[cellInfo[1]]
-						if cell:
-							tile.AssignData(cell)
-							CellTile.RefreshShortcuts(cell)
-						cells.erase(cellInfo)
-						break
+			for cellInfo in cells:
+				if cellInfo and cellInfo is Array and cellInfo.size() >= 3 and cellInfo[0] == tile.name:
+					var cell : BaseCell = null
+					match cellInfo[2]:
+						CellCommons.Type.ITEM:
+							cell = DB.ItemsDB.get(cellInfo[1])
+						CellCommons.Type.EMOTE:
+							cell = DB.EmotesDB.get(cellInfo[1])
+						CellCommons.Type.SKILL:
+							cell = DB.SkillsDB.get(cellInfo[1])
+					if cell:
+						tile.AssignData(cell)
+						CellTile.RefreshShortcuts(cell)
+					cells.erase(cellInfo)
+					break
 
 # Bug Reports
 func init_bugreports(apply : bool):

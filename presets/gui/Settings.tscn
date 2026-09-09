@@ -128,6 +128,11 @@ layout_mode = 2
 tooltip_text = "Shows touch buttons on screen for movement and actions."
 text = "Action Overlay"
 
+[node name="ResetWindows" type="Button" parent="Layout/Margin/TabBar/Render/RenderVBox/VisualVBox" unique_id=1637200903]
+layout_mode = 2
+tooltip_text = "Resets all game windows to their default size and position."
+text = "Reset Window Layout"
+
 [node name="HSeparator2" type="HSeparator" parent="Layout/Margin/TabBar/Render/RenderVBox" unique_id=186324792]
 layout_mode = 2
 
@@ -343,6 +348,7 @@ alignment = 1
 [connection signal="item_selected" from="Layout/Margin/TabBar/Render/RenderVBox/VisualVBox/WindowResolution/Option" to="." method="set_resolutionIdx"]
 [connection signal="item_selected" from="Layout/Margin/TabBar/Render/RenderVBox/VisualVBox/Scaling/Option" to="." method="set_scaling"]
 [connection signal="toggled" from="Layout/Margin/TabBar/Render/RenderVBox/VisualVBox/ActionOverlay" to="." method="set_actionoverlay"]
+[connection signal="pressed" from="Layout/Margin/TabBar/Render/RenderVBox/VisualVBox/ResetWindows" to="." method="reset_sessionoverlay"]
 [connection signal="toggled" from="Layout/Margin/TabBar/Render/RenderVBox/EffectVBox/Lighting" to="." method="set_lighting"]
 [connection signal="toggled" from="Layout/Margin/TabBar/Render/RenderVBox/EffectVBox/HQx4" to="." method="set_hq4x"]
 [connection signal="toggled" from="Layout/Margin/TabBar/Render/RenderVBox/EffectVBox/CRT" to="." method="set_crt"]
