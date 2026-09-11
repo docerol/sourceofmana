@@ -1,0 +1,58 @@
+# Shambleta — stack de produção para Coolify (beta fechado web).
+#
+# Importe como "Docker Compose" no Coolify. Domínios (menu Domains de cada
+# serviço):
+#   web       → https://seudominio.com        (client web; proxy injeta TLS)
+#   game      → https://ws.seudominio.com    (WebSocket; TLS do proxy)
+#   companion → SEM domínio público (rede interna; webhooks entram pelo proxy
+#               privado do Coolify ou via túnel — ver COOLIFY.md).
+#
+# Depois do primeiro deploy sete os Build Args do serviço web:
+#   SHAMBLETA_SERVER_ADDRESS = ws.seudominio.com
+#   (o client web é embutido com esse domínio — rebuild do web após mudar).
+#
+# Nada aqui deve ser exposto fora do proxy: game (6108) e companion (8901)
+# ficam na rede interna do Coolify, acessíveis só pelos domínios acima.
+services:
+  web:
+    build:
+      context: .
+      dockerfile: deploy/web/Dockerfile
+      args:
+        SHAMBLETA_SERVER_ADDRESS: ${SHAMBLETA_SERVER_ADDRESS:-}
+        SHAMBLETA_SERVER_PORT: ${SHAMBLETA_SERVER_PORT:-0}
+    restart: unless-stopped
+    depends_on:
+      game:
+        condition: service_started
+
+  game:
+    build:
+      context: .
+      dockerfile: deploy/server/Dockerfile
+    restart: unless-stopped
+    environment:
+      # TLS termina no proxy do Coolify — server binda ws:// plain na 6108.
+      SHAMBLETA_PROXY_TLS: "1"
+      # Diretório offsite de backups (best-effort, verificado com restore probe).
+      # Aponte para uma montagem persistente separada (ex.: volume offsite).
+      SHAMBLETA_OFFSITE_BACKUPS: ${SHAMBLETA_OFFSITE_BACKUPS:-}
+    volumes:
+      # live.db + sql-backups ficam aqui (user:// com HOME=/data).
+      - game-data:/data
+      # Offsite: segunda montagem só se SHAMBLETA_OFFSITE_BACKUPS for setado.
+      # - game-offsite:/data-offsite
+
+  companion:
+    build:
+      context: .
+      dockerfile: deploy/companion/Dockerfile
+    restart: unless-stopped
+    environment:
+      SHAMBLETA_WEBHOOK_SECRET: ${SHAMBLETA_WEBHOOK_SECRET:?set SHAMBLETA_WEBHOOK_SECRET no ambiente do Coolify}
+    volumes:
+      # MESMO volume do game: grant_queue é consumido do mesmo SQLite (WAL).
+      - game-data:/data
+
+volumes:
+  game-data:

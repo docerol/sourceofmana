@@ -6,9 +6,17 @@ const WebSocketPortTesting : int		= 6118
 const ENetPortTesting : int				= 6119
 const ServerAddressTesting : String		= "som.manasource.org"
 
-const WebSocketPort : int				= 6108
-const ENetPort : int					= 6109
-const ServerAddress : String			= "som.manasource.org"
+# SOM-IDLE beta deploy: endpoint público configurável em runtime — o deploy
+# (Coolify) sobrescreve via conf [Network] Server-Address / Server-Port
+# (Launcher._ready), então o mesmo binário serve dev e produção.
+static var WebSocketPort : int			= 6108
+static var ENetPort : int				= 6109
+static var ServerAddress : String		= "som.manasource.org"
+
+# SOM-IDLE beta deploy: TLS terminado no proxy reverso (Coolify/Traefik). O
+# server binda ws:// plain porque o proxy expõe wss:// ao cliente — nunca
+# ativar em binds públicos diretos. Lido de SHAMBLETA_PROXY_TLS=1.
+static var ProxyTLS : bool				= OS.get_environment("SHAMBLETA_PROXY_TLS").strip_edges() == "1"
 
 const LocalServerAddress : String		= "127.0.0.1"
 const MaxPlayerCount : int				= 128

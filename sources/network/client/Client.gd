@@ -524,7 +524,12 @@ func _enter_tree():
 	var tlsOptions : TLSOptions = TLSOptions.client_unsafe()
 	if useWebSocket:
 		var prefix : String = "ws://" if isLocal else "wss://"
-		ret = currentPeer.create_client(prefix + serverAddress + ":" + str(serverPort), tlsOptions)
+		# SOM-IDLE beta deploy: no browser o proxy reverso (Coolify) termina o
+		# TLS na 443 — URL sem sufixo de porta; desktop mantém a porta explícita.
+		var url : String = prefix + serverAddress
+		if isLocal or not LauncherCommons.isWeb:
+			url += ":%d" % serverPort
+		ret = currentPeer.create_client(url, tlsOptions)
 	else:
 		ret = currentPeer.create_client(serverAddress, serverPort)
 		if ret == OK and not isLocal:

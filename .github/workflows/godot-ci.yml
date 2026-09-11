@@ -137,6 +137,50 @@ jobs:
           timeout 300 godot --headless --path . -s tests/run_idle_tests.gd
           # Exit code = number of failed checks (0 = green)
 
+  # SOM-IDLE beta deploy: export Web (pivô idle é web-first). O artifact é
+  # servido com COOP/COEP pelo nginx do deploy/web/Dockerfile (Coolify).
+  web-export:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.7.1
+    name: Export Web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          lfs: true
+
+      - name: Import assets
+        run: |
+          cd "$PROJECT_PATH"
+          godot --headless --editor --import --quit
+
+      - name: Build Web
+        run: |
+          cd "$PROJECT_PATH"
+          mkdir -p build/Web
+          # pasta destino criada ANTES do export: o plugin do Sentry copia
+          # sentry-bundle.js no export_begin e aborta se o dir não existe.
+          godot --headless --path . --export-release "Web" build/Web/index.html
+
+      - name: Measure gzip weight (meta < 25 MB)
+        run: |
+          cd "$PROJECT_PATH/build/Web"
+          total=0
+          for f in index.pck index.wasm index.js index.side.wasm libgdsqlite*.wasm; do
+            [ -f "$f" ] || continue
+            gz=$(gzip -9 -c "$f" | wc -c)
+            total=$((total+gz))
+          done
+          echo "First-load gzip: $((total/1024/1024)) MB"
+          test "$total" -lt $((25*1024*1024)) || echo "::warning::first-load gzip acima da meta de 25 MB (ver deploy/COOLIFY.md §6)"
+
+      - name: Upload Artifact - Web
+        uses: actions/upload-artifact@v5
+        with:
+          name: Web
+          path: build/Web
+
   snap:
     runs-on: ubuntu-latest
     needs: builds

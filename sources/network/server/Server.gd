@@ -629,10 +629,14 @@ func _enter_tree():
 		tlsOptions = TLSOptions.server(serverKey, serverCert)
 
 	# SOM-IDLE A2: produção pública recusa bind inseguro (credenciais em claro).
-	if NetworkCommons.RequiresTLS(LauncherCommons.IsTesting, isOffline, isLocal) and tlsOptions == null:
+	# SOM-IDLE beta deploy: com ProxyTLS o proxy reverso (Coolify) termina o
+	# TLS — o bind plain é intencional e o proxy é a borda criptográfica.
+	if NetworkCommons.RequiresTLS(LauncherCommons.IsTesting, isOffline, isLocal) and tlsOptions == null and not NetworkCommons.ProxyTLS:
 		Util.PrintLog("Server", "FATAL: missing %s/%s — refusing insecure public bind" % [NetworkCommons.ServerCertPath, NetworkCommons.ServerKeyPath])
 		assert(false, "TLS certificate required for public server (SOM-IDLE A2)")
 		return
+	if NetworkCommons.ProxyTLS:
+		Util.PrintLog("Server", "TLS terminated upstream (reverse proxy) — binding plain WebSocket")
 
 	multiplayerAPI.auth_callback = _ValidateAuth
 	multiplayerAPI.auth_timeout = NetworkCommons.LoginAttemptTimeout

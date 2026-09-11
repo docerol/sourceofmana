@@ -1236,7 +1236,7 @@ func SuiteGuilds(sql : SQLService) -> void:
 	CheckEq(int(economy.GetGuild(guildID)["level"]), 2, "guild level 2")
 	Check(economy.LevelUpGuild(accountB, charB), "officer levels to 3")
 	var buff : float = economy.GuildBuffForAccount(accountA)
-	Check(absf(buff - 1.04) < 0.001, "buff +4% at level 3 (%.3f)" % buff)
+	Check(absf(buff - 1.04) < 0.001, "buff +4%% at level 3 (%.3f)" % buff)
 	var top : Array = economy.GetGuildLeaderboard(10)
 	Check(not top.is_empty() and int(top[0]["guild_id"]) == guildID, "leaderboard lists guild")
 

@@ -156,6 +156,17 @@ func _ready():
 
 	Conf.Init()
 
+	# SOM-IDLE beta deploy: endpoint público vindo do conf [Network] (baked no
+	# build web — settings.cfg embarca no pck; deploy Coolify grava via ARG).
+	var confAddress : String = Conf.GetString("Network", "Server-Address", Conf.Type.SETTINGS)
+	if not confAddress.is_empty():
+		NetworkCommons.ServerAddress = confAddress
+	var confPort : int = Conf.GetInt("Network", "Server-Port", Conf.Type.SETTINGS)
+	if confPort > 0:
+		NetworkCommons.WebSocketPort = confPort
+	if confPort > 0:
+		NetworkCommons.WebSocketPort = confPort
+
 	if "--server" in OS.get_cmdline_args():
 		Scene = FileSystem.LoadResource(Path.Pst + "Server" + Path.SceneExt)
 		Root.add_child.call_deferred(Scene)
