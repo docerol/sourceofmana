@@ -4,6 +4,13 @@ class_name NetClient
 # SOM-IDLE onboarding: último AFK report (lido pela janela AfkReport).
 static var LastAFKReport : Dictionary = {}
 
+# SOM-IDLE beta GUI: último estado de economia (wallet/baús/odds/preços),
+# último drop de baú e boards da temporada ativa (lidos pelas janelas).
+static var LastEconomyState : Dictionary = {}
+static var LastChestOpened : Dictionary = {}
+static var LastSeasonBoards : Dictionary = {}
+static var LastLeaderboard : Array = []
+
 #
 func WarpPlayer(mapID : int, playerPos : Vector2, _peerID : int):
 	if Launcher.Map:
@@ -345,6 +352,7 @@ func SeasonPassState(state : Dictionary, _peerID : int):
 
 # SOM-IDLE: F3 — leaderboard and VIP status surfaced as notifications (F2 convention)
 func Leaderboard(entries : Array, _peerID : int):
+	LastLeaderboard = entries
 	if not Launcher.GUI:
 		return
 	if entries.is_empty():
@@ -359,6 +367,9 @@ func Leaderboard(entries : Array, _peerID : int):
 		lines.append("#%d %s — L%d power %d" % [rank, str(entry.get("nickname", "?")), int(entry.get("level", 0) if entry.get("level", 0) != null else 0), int(entry.get("power_score", 0) if entry.get("power_score", 0) != null else 0)])
 		rank += 1
 	Launcher.GUI.notificationLabel.AddNotification("\n".join(lines))
+	# SOM-IDLE beta GUI: espelha no window leaderboard quando aberto.
+	if Launcher.GUI.leaderboardWindow and Launcher.GUI.leaderboardWindow.is_visible():
+		Launcher.GUI.leaderboardWindow.ShowTop(entries)
 
 func VIPState(state : Dictionary, _peerID : int):
 	if not Launcher.GUI:
@@ -367,6 +378,38 @@ func VIPState(state : Dictionary, _peerID : int):
 		Launcher.GUI.notificationLabel.AddNotification("VIP active (idle faucet x%.1f)" % float(state.get("mods", 1.0)))
 	else:
 		Launcher.GUI.notificationLabel.AddNotification("VIP inactive")
+
+# SOM-IDLE beta GUI — respostas das janelas de economia. EconomyState é o carro-
+# chefe: toda ação do Shop/Chests devolve o estado novo e as janelas se redesenham.
+func EconomyState(state : Dictionary, _peerID : int):
+	LastEconomyState = state
+	if not Launcher.GUI:
+		return
+	if Launcher.GUI.shopWindow and Launcher.GUI.shopWindow.is_visible():
+		Launcher.GUI.shopWindow.ShowState(state)
+	if Launcher.GUI.chestsWindow and Launcher.GUI.chestsWindow.is_visible():
+		Launcher.GUI.chestsWindow.ShowState(state)
+
+func ChestOpened(result : Dictionary, _peerID : int):
+	LastChestOpened = result
+	if not Launcher.GUI:
+		return
+	if result.is_empty():
+		Launcher.GUI.notificationLabel.AddNotification("Could not open chest (not yours or already opened)")
+		return
+	var pityTag : String = " [PITY!]" if bool(result.get("pity", false)) else ""
+	Launcher.GUI.notificationLabel.AddNotification("Chest %d: %s x%d%s" % [int(result.get("chest_id", 0)), str(result.get("item_name", "?")), int(result.get("count", 1)), pityTag])
+	if Launcher.GUI.chestsWindow and Launcher.GUI.chestsWindow.is_visible():
+		Launcher.GUI.chestsWindow.ShowLastDrop(result)
+
+func ShopFeedback(ok : bool, reason : String, _peerID : int):
+	if Launcher.GUI:
+		Launcher.GUI.notificationLabel.AddNotification(("Shop: " if ok else "Shop rejected: ") + reason)
+
+func SeasonBoards(data : Dictionary, _peerID : int):
+	LastSeasonBoards = data
+	if Launcher.GUI and Launcher.GUI.leaderboardWindow and Launcher.GUI.leaderboardWindow.is_visible():
+		Launcher.GUI.leaderboardWindow.ShowSeason(data)
 
 func RefreshOnlineList(players : PackedStringArray, _peerID : int):
 	if Launcher.GUI:

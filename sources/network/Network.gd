@@ -410,6 +410,45 @@ func Leaderboard(entries : Array, peerID : int = NetworkCommons.PeerOfflineID):
 func SetFormationSlot(slot : int, peerID : int = NetworkCommons.PeerAuthorityID):
 	CallServer("SetFormationSlot", [slot], peerID, NetworkCommons.DelayConfig)
 
+# SOM-IDLE beta GUI — janelas de economia (Shop/Chests/Leaderboard). Toda ação
+# devolve EconomyState fresco: as janelas se atualizam sem re-poll.
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func GetEconomyState(peerID : int = NetworkCommons.PeerAuthorityID):
+	CallServer("GetEconomyState", [], peerID, NetworkCommons.DelayConfig)
+
+@rpc("authority", "call_remote", "reliable", EChannel.ACTION)
+func EconomyState(state : Dictionary, peerID : int = NetworkCommons.PeerOfflineID):
+	CallClient("EconomyState", [state], peerID)
+
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func OpenChest(chestID : int, peerID : int = NetworkCommons.PeerAuthorityID):
+	# Burst de abertura é o fluxo normal (baús acumulam no settle) — delta curto.
+	CallServer("OpenChest", [chestID], peerID, 1500)
+
+@rpc("authority", "call_remote", "reliable", EChannel.ACTION)
+func ChestOpened(result : Dictionary, peerID : int = NetworkCommons.PeerOfflineID):
+	CallClient("ChestOpened", [result], peerID)
+
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func BuyChests(count : int, peerID : int = NetworkCommons.PeerAuthorityID):
+	CallServer("BuyChests", [count], peerID, NetworkCommons.DelayConfig)
+
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func PurchaseVIP(tier : int, peerID : int = NetworkCommons.PeerAuthorityID):
+	CallServer("PurchaseVIP", [tier], peerID, NetworkCommons.DelayConfig)
+
+@rpc("authority", "call_remote", "reliable", EChannel.ACTION)
+func ShopFeedback(ok : bool, reason : String, peerID : int = NetworkCommons.PeerOfflineID):
+	CallClient("ShopFeedback", [ok, reason], peerID)
+
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func GetSeasonBoards(peerID : int = NetworkCommons.PeerAuthorityID):
+	CallServer("GetSeasonBoards", [], peerID, NetworkCommons.DelayMinute)
+
+@rpc("authority", "call_remote", "reliable", EChannel.ACTION)
+func SeasonBoards(data : Dictionary, peerID : int = NetworkCommons.PeerOfflineID):
+	CallClient("SeasonBoards", [data], peerID)
+
 # Inventory
 @rpc("authority", "call_remote", "reliable", EChannel.ENTITY)
 func ItemAdded(itemID : int, customfield : StringName, count : int, peerID : int = NetworkCommons.PeerOfflineID):

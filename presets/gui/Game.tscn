@@ -64,6 +64,16 @@
 [ext_resource type="PackedScene" uid="uid://b8frfkv2y8x6" path="res://presets/gui/RespawnWindow.tscn" id="44_7o5pa"]
 [ext_resource type="PackedScene" uid="uid://duqpp1dik8h8h" path="res://presets/gui/Character.tscn" id="49_78q3w"]
 [ext_resource type="PackedScene" uid="uid://dolxuw03u60eo" path="res://presets/gui/Progress.tscn" id="54_112vu"]
+[ext_resource type="PackedScene" path="res://presets/gui/Chests.tscn" id="55_chest"]
+[ext_resource type="PackedScene" path="res://presets/gui/Shop.tscn" id="56_shop"]
+[ext_resource type="PackedScene" path="res://presets/gui/Leaderboard.tscn" id="57_board"]
+[ext_resource type="Texture2D" uid="uid://djkvk5b85leb3" path="res://data/graphics/sprites/npcs/chest-small.png" id="58_chesticon"]
+[ext_resource type="Texture2D" uid="uid://6djajxhhk1c7" path="res://data/graphics/items/common/treasure-key.png" id="59_shopicon"]
+[ext_resource type="Texture2D" uid="uid://b6ukqnxo358u0" path="res://data/graphics/items/head/tonori-crown.png" id="60_boardicon"]
+
+[sub_resource type="AtlasTexture" id="AtlasTexture_chesticon"]
+atlas = ExtResource("58_chesticon")
+region = Rect2(0, 0, 32, 32)
 
 [sub_resource type="ShaderMaterial" id="ShaderMaterial_wjdwk"]
 shader = ExtResource("4_60kv4")
@@ -254,6 +264,27 @@ visible = false
 layout_mode = 2
 texture = ExtResource("9_vtuwx")
 targetWindow = NodePath("../../../../../../../Windows/Floating/AFK")
+
+[node name="Chests" parent="Overlay/VSections/Indicators/Menu/MenuContent/HBoxItems" node_paths=PackedStringArray("targetWindow") instance=ExtResource("3_sl5jl")]
+visible = false
+layout_mode = 2
+tooltip_text = "Chests"
+texture = SubResource("AtlasTexture_chesticon")
+targetWindow = NodePath("../../../../../../../Windows/Floating/Chests")
+
+[node name="Shop" parent="Overlay/VSections/Indicators/Menu/MenuContent/HBoxItems" node_paths=PackedStringArray("targetWindow") instance=ExtResource("3_sl5jl")]
+visible = false
+layout_mode = 2
+tooltip_text = "Shop"
+texture = ExtResource("59_shopicon")
+targetWindow = NodePath("../../../../../../../Windows/Floating/Shop")
+
+[node name="Leaderboard" parent="Overlay/VSections/Indicators/Menu/MenuContent/HBoxItems" node_paths=PackedStringArray("targetWindow") instance=ExtResource("3_sl5jl")]
+visible = false
+layout_mode = 2
+tooltip_text = "Leaderboard"
+texture = ExtResource("60_boardicon")
+targetWindow = NodePath("../../../../../../../Windows/Floating/Leaderboard")
 
 [node name="Contexts" type="Control" parent="Overlay/VSections" unique_id=238552505]
 z_as_relative = false
@@ -513,6 +544,45 @@ offset_left = 700.0
 offset_top = 180.0
 offset_right = 1000.0
 offset_bottom = 420.0
+grow_horizontal = 1
+grow_vertical = 1
+saveOverlayState = true
+allowAutomaticResize = true
+
+[node name="Chests" parent="Windows/Floating" instance=ExtResource("55_chest")]
+visible = false
+show_behind_parent = false
+layout_mode = 0
+offset_left = 620.0
+offset_top = 140.0
+offset_right = 1020.0
+offset_bottom = 540.0
+grow_horizontal = 1
+grow_vertical = 1
+saveOverlayState = true
+allowAutomaticResize = true
+
+[node name="Shop" parent="Windows/Floating" instance=ExtResource("56_shop")]
+visible = false
+show_behind_parent = false
+layout_mode = 0
+offset_left = 640.0
+offset_top = 160.0
+offset_right = 1000.0
+offset_bottom = 520.0
+grow_horizontal = 1
+grow_vertical = 1
+saveOverlayState = true
+allowAutomaticResize = true
+
+[node name="Leaderboard" parent="Windows/Floating" instance=ExtResource("57_board")]
+visible = false
+show_behind_parent = false
+layout_mode = 0
+offset_left = 660.0
+offset_top = 120.0
+offset_right = 1040.0
+offset_bottom = 560.0
 grow_horizontal = 1
 grow_vertical = 1
 saveOverlayState = true

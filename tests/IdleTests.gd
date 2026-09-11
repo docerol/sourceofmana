@@ -867,6 +867,59 @@ func SuiteVIPCheckout(sql : SQLService, charID : int, accountID : int) -> void:
 	# Invalid tier
 	Check(not economy.PurchaseVIP(accountID, 3), "invalid tier rejected")
 
+# SOM-IDLE beta GUI: shop server-side flows — BuyChests (sink de gems) e o
+# estado consolidado que alimenta as janelas Shop/Chests/Leaderboard.
+func SuiteEconomyShop(sql : SQLService, charID : int, accountID : int) -> void:
+	print("[suite] economy shop (beta GUI)")
+	var economy : EconomyService = Launcher.Economy
+	var openBefore : int = int(sql.GetChestStats(charID)["closed"])
+
+	# Counts fora da faixa rejeitados sem tocar na wallet
+	Check(economy.BuyChests(accountID, charID, 0).is_empty(), "buy 0 rejected")
+	Check(economy.BuyChests(accountID, charID, economy.MaxChestsPerPurchase + 1).is_empty(), "buy >max rejected")
+
+	# Gems insuficientes: rejeitado, nada criado
+	sql.SetGems(accountID, 50)
+	Check(economy.BuyChests(accountID, charID, 1).is_empty(), "insufficient gems rejected")
+	CheckEq(int(sql.GetChestStats(charID)["closed"]), openBefore, "no chest on rejection")
+
+	# Happy path: 5 baús, débito exato, ledger espelhado, origin 'shop'
+	sql.SetGems(accountID, 1000)
+	var result : Dictionary = economy.BuyChests(accountID, charID, 5)
+	Check(not result.is_empty(), "buy 5 accepted")
+	CheckEq(int(result.get("cost", 0)), economy.ChestCostGems * 5, "cost = 5x unit")
+	CheckEq(economy.GetGems(accountID), 1000 - economy.ChestCostGems * 5, "gems debited")
+	CheckEq(int(sql.GetChestStats(charID)["closed"]), openBefore + 5, "5 closed chests created")
+	var shopRows : int = int(sql.QueryBindings("SELECT COUNT(*) AS n FROM chest_instance WHERE char_id = ? AND origin = 'shop';", [charID])[0]["n"])
+	CheckEq(shopRows, 5, "origin 'shop' marked")
+	var ledger : Array[Dictionary] = sql.QueryBindings("SELECT amount FROM ledger_transaction WHERE account_id = ? AND reason = 'chest_buy:5';", [accountID])
+	Check(ledger.size() == 1 and int(ledger[0]["amount"]) == -economy.ChestCostGems * 5, "ledger mirror chest_buy")
+
+	# Baú comprado abre (drop cai, estado vira opened)
+	var shopChest : int = 0
+	for chest in sql.GetClosedChests(charID):
+		if str(chest.get("origin", "")) == "shop":
+			shopChest = int(chest["id"])
+			break
+	Check(shopChest > 0, "bought chest listed closed")
+	var opened : Dictionary = economy.OpenChest(charID, shopChest)
+	Check(not opened.is_empty() and int(opened.get("item_id", 0)) > 0, "bought chest opens with item")
+	CheckEq(int(sql.GetChestStats(charID)["closed"]), openBefore + 4, "chest consumed on open")
+
+	# Estado consolidado (contrato das janelas)
+	var state : Dictionary = economy.GetEconomyState(accountID, charID)
+	Check(state.has("gems") and state.has("chests") and state.has("odds_text"), "economy state has wallet/chests/odds")
+	Check(state.has("vip") and int(state.get("vip1_cost", 0)) > 0 and int(state.get("vip2_cost", 0)) > 0, "economy state has vip pricing")
+	CheckEq(int(state.get("chest_cost", 0)), economy.ChestCostGems, "economy state chest cost")
+
+	# Boards da temporada: sem temporada → {}; criada → shaped com nomes
+	Check(economy.GetSeasonBoardsState(10).is_empty(), "no season → empty boards")
+	var seasonID : int = economy.CreateSeason(7)
+	if Check(seasonID > 0, "season created for boards test"):
+		var boards : Dictionary = economy.GetSeasonBoardsState(10)
+		Check(int(boards.get("season_id", 0)) == seasonID and boards.has("power") and boards.has("spend"), "boards shaped with names")
+		Check(economy.CloseSeason(seasonID), "season closed")
+
 # Item lots (SOM-IDLE B1): per-grant identity, FIFO consume, trade chain, reconcile.
 func SuiteItemLots(sql : SQLService) -> void:
 	print("[suite] Item lots (B1)")

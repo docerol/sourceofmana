@@ -94,6 +94,10 @@ func _run_tests():
 			suites.SuiteTrade(sql, f4a, f4b, acctA, acctB)
 			suites.SuiteChests(sql, f4a, acctA)
 			suites.SuiteVIPCheckout(sql, f4a, acctA)
+			# SOM-IDLE beta GUI: shop (BuyChests + consolidated economy state)
+			var guiChar : int = suites.CreateFixture(sql, "idle_gui_account", "IdleGuiTester")
+			if suites.Check(guiChar != 0, "GUI economy fixture created (charID %d)" % guiChar):
+				suites.SuiteEconomyShop(sql, guiChar, sql.GetAccountIDForCharacter(guiChar))
 			# SOM-IDLE: B1 item lots + B2 chest odds + B3 wipe baseline + C1 grants + D2 telemetry
 			suites.SuiteItemLots(sql)
 			suites.SuiteChestOdds(sql)

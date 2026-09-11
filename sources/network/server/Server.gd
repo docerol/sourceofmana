@@ -328,6 +328,57 @@ func SetFormationSlot(slot : int, peerID : int):
 	Launcher.SQL.SetCharacterFormationSlot(charID, slot)
 	Network.FarmZoneFeedback(0, true, "formation_slot_saved", peerID)
 
+# SOM-IDLE beta GUI — handlers das janelas de economia. Toda ação devolve
+# EconomyState fresco depois de responder (ordem reliable: feedback → estado).
+func GetEconomyState(peerID : int):
+	var charID : int = Peers.GetCharacter(peerID)
+	var accountID : int = Peers.GetAccount(peerID)
+	if charID == NetworkCommons.PeerUnknownID or accountID == NetworkCommons.PeerUnknownID:
+		Network.EconomyState({}, peerID)
+		return
+	Network.EconomyState(Launcher.Economy.GetEconomyState(accountID, charID), peerID)
+
+func OpenChest(chestID : int, peerID : int):
+	var charID : int = Peers.GetCharacter(peerID)
+	var accountID : int = Peers.GetAccount(peerID)
+	var result : Dictionary = {}
+	if charID != NetworkCommons.PeerUnknownID and accountID != NetworkCommons.PeerUnknownID:
+		result = Launcher.Economy.OpenChest(charID, chestID)
+		if not result.is_empty():
+			var cell : ItemCell = DB.ItemsDB.get(int(result["item_id"]), null)
+			result["item_name"] = cell._name if cell != null else "?"
+			Network.EconomyState(Launcher.Economy.GetEconomyState(accountID, charID), peerID)
+	Network.ChestOpened(result, peerID)
+
+func BuyChests(count : int, peerID : int):
+	var charID : int = Peers.GetCharacter(peerID)
+	var accountID : int = Peers.GetAccount(peerID)
+	if charID == NetworkCommons.PeerUnknownID or accountID == NetworkCommons.PeerUnknownID:
+		Network.ShopFeedback(false, "not_logged_in", peerID)
+		return
+	var result : Dictionary = Launcher.Economy.BuyChests(accountID, charID, count)
+	if result.is_empty():
+		Network.ShopFeedback(false, "rejected (gems or count 1..%d)" % Launcher.Economy.MaxChestsPerPurchase, peerID)
+		return
+	Network.ShopFeedback(true, "%d chests for %d gems" % [int(result["count"]), int(result["cost"])], peerID)
+	Network.EconomyState(Launcher.Economy.GetEconomyState(accountID, charID), peerID)
+
+func PurchaseVIP(tier : int, peerID : int):
+	var accountID : int = Peers.GetAccount(peerID)
+	if accountID == NetworkCommons.PeerUnknownID:
+		Network.ShopFeedback(false, "not_logged_in", peerID)
+		return
+	if not Launcher.Economy.PurchaseVIP(accountID, tier):
+		Network.ShopFeedback(false, "rejected (tier 1|2 or insufficient gems)", peerID)
+		return
+	var charID : int = Peers.GetCharacter(peerID)
+	Network.ShopFeedback(true, "VIP tier %d purchased" % tier, peerID)
+	if charID != NetworkCommons.PeerUnknownID:
+		Network.EconomyState(Launcher.Economy.GetEconomyState(accountID, charID), peerID)
+
+func GetSeasonBoards(peerID : int):
+	Network.SeasonBoards(Launcher.Economy.GetSeasonBoardsState(10), peerID)
+
 func CharacterListing(peerID : int):
 	var err : NetworkCommons.CharacterError = NetworkCommons.CharacterError.ERR_OK
 	var accountID : int = Peers.GetAccount(peerID)

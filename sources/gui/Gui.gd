@@ -42,6 +42,10 @@ extends ServiceBase
 @onready var zoneWindow : WindowPanel			= $Windows/Floating/ZoneMap
 @onready var formationWindow : WindowPanel		= $Windows/Floating/Formation
 @onready var afkWindow : WindowPanel				= $Windows/Floating/AFK
+# SOM-IDLE beta GUI: janelas de economia (Shop/Chests/Leaderboard)
+@onready var shopWindow : WindowPanel			= $Windows/Floating/Shop
+@onready var chestsWindow : WindowPanel			= $Windows/Floating/Chests
+@onready var leaderboardWindow : WindowPanel	= $Windows/Floating/Leaderboard
 
 @onready var chatContainer : ChatContainer		= $Windows/Floating/Chat/Margin/VBoxContainer
 @onready var emoteContainer : Container			= $Windows/Floating/Emote/Layout/ItemContainer/Grid

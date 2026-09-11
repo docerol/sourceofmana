@@ -382,6 +382,93 @@ func PurchaseVIP(accountID : int, tier : int) -> bool:
 # {"char_id": N} no payload, e o char deve pertencer à conta.
 const GrantKinds : Array[String] = ["gems", "gold", "vip_days"]
 
+# ------------------------------------------------------------------ beta GUI: shop (sink de gems) + estado consolidado das janelas
+
+# Placeholder pricing (mesmo regime do VIP — tuning pós-beta).
+const ChestCostGems : int = 120
+const MaxChestsPerPurchase : int = 10
+
+# Gems -> N baús fechados (origin 'shop'). Atômico: débito, ledger e rows no
+# MESMO Transaction com ops db-diretas (regra F4 — nada de update_rows aninhado;
+# settleMutex não re-entra em AddGems, por isso o path é raw).
+# Retorna {"count", "cost", "balance"} ou {} quando rejeitado.
+func BuyChests(accountID : int, charID : int, count : int) -> Dictionary:
+	var result : Dictionary = {}
+	if count < 1 or count > MaxChestsPerPurchase:
+		return result
+	settleMutex.lock()
+	if Launcher.SQL.Transaction(func() -> bool:
+		var sql : SQLService = Launcher.SQL
+		var balance : int = sql.GetGemsRaw(accountID)
+		var cost : int = ChestCostGems * count
+		if balance < cost:
+			return false
+		if not sql.SetGemsRaw(accountID, balance - cost):
+			return false
+		if not _LedgerAppendLocked(accountID, charID, LedgerKindGems, -cost, balance - cost, "chest_buy:%d" % count):
+			return false
+		for i in count:
+			if not sql.AddChestInstance(charID, 0, "shop"):
+				return false
+		result.clear()
+		result.merge({"count" = count, "cost" = cost, "balance" = balance - cost})
+		return true):
+		pass
+	settleMutex.unlock()
+	return result
+
+# Estado consolidado das janelas de economia (Shop/Chests): wallet, baús
+# fechados, odds públicas (texto pré-formatado, compliance loot box) e preços.
+# Uma RPC única — as janelas pedem ao abrir e as ações devolvem o estado novo.
+func GetEconomyState(accountID : int, charID : int) -> Dictionary:
+	var chestIDs : Array = []
+	for chest in Launcher.SQL.GetClosedChests(charID):
+		chestIDs.append(int(chest["id"]))
+	var until : int = Launcher.SQL.GetVIPUntil(accountID)
+	var now : int = SQLCommons.Timestamp()
+	var vipActive : bool = until > now
+	var odds : Dictionary = GetChestOddsForCharacter(charID)
+	return {
+		"gems" = GetGems(accountID),
+		"chests" = chestIDs,
+		"odds" = odds,
+		"odds_text" = FormatChestOdds(odds),
+		"chest_cost" = ChestCostGems,
+		"vip" = {"active" = vipActive, "until" = until, "mods" = OfflineSettle.VIPModFactor if vipActive else 1.0},
+		"vip1_cost" = VIP1CostGems,
+		"vip2_cost" = VIP2CostGems,
+	}
+
+# Boards da temporada ativa em um shot, já com nomes resolvidos (GUI de
+# leaderboard). {} quando não há temporada ativa.
+func GetSeasonBoardsState(limit : int = 10) -> Dictionary:
+	var season : Dictionary = ActiveSeason()
+	if season.is_empty():
+		return {}
+	var seasonID : int = int(season["season_id"])
+	return {
+		"season_id" = seasonID,
+		"ends_at" = int(season["ends_at"]),
+		"power" = _NamedSeasonBoard(seasonID, "power", limit),
+		"spend" = _NamedSeasonBoard(seasonID, "spend", limit),
+	}
+
+# subject_id → nome legível: power é por char (nickname), spend por conta
+# (username). ≤ limit rows por board, chamada rate-limited — queries por linha OK.
+func _NamedSeasonBoard(seasonID : int, kind : String, limit : int) -> Array:
+	var named : Array = []
+	for row in GetSeasonBoard(seasonID, kind, limit):
+		var name : String = "?"
+		if kind == "power":
+			var chars : Array[Dictionary] = Launcher.SQL.QueryBindings("SELECT nickname FROM character WHERE char_id = ?;", [int(row["subject_id"])])
+			name = str(chars[0]["nickname"]) if not chars.is_empty() else "?"
+		else:
+			var accounts : Array[Dictionary] = Launcher.SQL.QueryBindings("SELECT username FROM account WHERE account_id = ?;", [int(row["subject_id"])])
+			name = str(accounts[0]["username"]) if not accounts.is_empty() else "?"
+		named.append({"name" = name, "value" = int(row["value"])})
+	return named
+
+
 # Enfileira um grant (idempotente pela chave: duplicada = já na fila, sem erro).
 func EnqueueGrant(accountID : int, kind : String, amount : int, idempotencyKey : String, payload : String = "{}") -> bool:
 	if idempotencyKey.is_empty() or amount <= 0 or not GrantKinds.has(kind):
