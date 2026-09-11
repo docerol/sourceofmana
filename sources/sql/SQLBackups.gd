@@ -30,6 +30,39 @@ func CopyBackup(backupFilePath : String, backupFrequency : SQLCommons.BackupFreq
 		Util.PrintLog("SQL", "Backup failed for file %s with code %d" % [newFile, errorCode])
 		return ""
 
+# SOM-IDLE A2: push offsite best-effort + verificação de restore.
+# Chamado após o backup diário; nunca falha o backup local.
+static func PushOffsite(backupFilePath : String, offsiteDir : String = "") -> String:
+	var target : String = offsiteDir if not offsiteDir.is_empty() else SQLCommons.GetOffsiteBackupPath()
+	if target.is_empty() or backupFilePath.is_empty():
+		return ""
+	if not DirAccess.dir_exists_absolute(target):
+		if DirAccess.make_dir_absolute(target) != OK:
+			Util.PrintLog("SQL", "Offsite backup dir unreachable: " + target)
+			return ""
+	var newFile : String = target.rstrip("/") + "/" + backupFilePath.get_file()
+	if DirAccess.copy_absolute(backupFilePath, newFile) != OK:
+		Util.PrintLog("SQL", "Offsite backup copy failed: " + newFile)
+		return ""
+	if not VerifyBackupRestorable(newFile):
+		Util.PrintLog("SQL", "Offsite backup failed restore check: " + newFile)
+		return ""
+	Util.PrintInfo("SQL", "Offsite backup pushed + verified: " + newFile)
+	return newFile
+
+# Abre a cópia e lê a tabela migration — prova que o restore abre e é legível.
+static func VerifyBackupRestorable(backupFilePath : String) -> bool:
+	if backupFilePath.is_empty() or not FileAccess.file_exists(backupFilePath):
+		return false
+	var probe : SQLite = SQLite.new()
+	probe.path = backupFilePath
+	probe.verbosity_level = SQLite.QUIET
+	if not probe.open_db():
+		return false
+	var ok : bool = probe.query("SELECT version FROM migration LIMIT 1;") and not probe.query_result.is_empty()
+	probe.close_db()
+	return ok
+
 func PruneBackups() -> void:
 	for backupFrequency in SQLCommons.BackupFrequency.values():
 		var backupFrequencyDir = SQLCommons.BackupFrequency.keys()[backupFrequency]
@@ -69,6 +102,11 @@ func Run():
 		if timestamp - lastDailyBackupTimestamp >= SQLCommons.DailyBackupIntervalSec:
 			var backupFilePath: String = CreateDailyBackup()
 			lastDailyBackupTimestamp = timestamp
+			if not backupFilePath.is_empty():
+				PushOffsite(backupFilePath)
+				# SOM-IDLE D2: reconcile diário após o backup (best-effort).
+				if Launcher.Economy:
+					Launcher.Economy.RunReconcileJob()
 
 			if timestamp - lastWeeklyBackupTimestamp >= SQLCommons.WeeklyBackupIntervalSec \
 					and !backupFilePath.is_empty():

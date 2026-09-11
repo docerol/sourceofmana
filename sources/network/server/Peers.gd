@@ -196,6 +196,9 @@ static func FinalizeLogin(peer : Peer, accountName : String, accountData : Accou
 		return NetworkCommons.AuthError.ERR_BANNED
 
 	peer.SetAccount(accountData)
+	# SOM-IDLE D2: login telemetry (best-effort, nunca falha o login).
+	if Launcher.Telemetry:
+		Launcher.Telemetry.Record("login", accountData.accountID)
 	if platform < 0 or platform >= NetworkCommons.Platform.COUNT:
 		platform = NetworkCommons.Platform.UNKNOWN
 	Launcher.SQL.UpdateAccount(peer.accountID, platform)

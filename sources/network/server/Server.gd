@@ -10,7 +10,9 @@ func CreateAccount(accountName : String, password : String, email : String, reme
 	else:
 		err = NetworkCommons.CheckAuthInformation(accountName, password)
 		if err == NetworkCommons.AuthError.ERR_OK:
-			if Launcher.SQL.HasAccount(accountName):
+			err = NetworkCommons.CheckEmailInformation(email)
+		if err == NetworkCommons.AuthError.ERR_OK:
+			if Launcher.SQL.HasAccount(accountName) or Launcher.SQL.HasEmail(email):
 				err = NetworkCommons.AuthError.ERR_NAME_AVAILABLE
 			elif not Launcher.SQL.AddAccount(accountName, password, email):
 				err = NetworkCommons.AuthError.ERR_NAME_AVAILABLE
@@ -29,11 +31,16 @@ func LoginWithPassword(accountName : String, password : String, rememberMe : boo
 	else:
 		err = NetworkCommons.CheckAuthInformation(accountName, password)
 		if err == NetworkCommons.AuthError.ERR_OK:
-			var accountData : Peers.AccountData = Launcher.SQL.ValidateAuthPassword(accountName, password)
-			if not accountData:
+			# SOM-IDLE A1: lockout responde genérico (anti-enumeration).
+			var accountID : int = Launcher.SQL.GetAccountID(accountName)
+			if accountID != NetworkCommons.PeerUnknownID and Launcher.SQL.IsLockedOut(accountID):
 				err = NetworkCommons.AuthError.ERR_AUTH
 			else:
-				err = Peers.FinalizeLogin(peer, accountName, accountData, platform, rememberMe)
+				var accountData : Peers.AccountData = Launcher.SQL.ValidateAuthPassword(accountName, password)
+				if not accountData:
+					err = NetworkCommons.AuthError.ERR_AUTH
+				else:
+					err = Peers.FinalizeLogin(peer, accountName, accountData, platform, rememberMe)
 	Network.AuthError(err, peerID)
 
 func LoginWithToken(accountName : String, token : String, platform : int, peerID : int):
@@ -618,6 +625,12 @@ func _enter_tree():
 		serverKey.load(NetworkCommons.ServerKeyPath)
 		serverCert.load(NetworkCommons.ServerCertPath)
 		tlsOptions = TLSOptions.server(serverKey, serverCert)
+
+	# SOM-IDLE A2: produção pública recusa bind inseguro (credenciais em claro).
+	if NetworkCommons.RequiresTLS(LauncherCommons.IsTesting, isOffline, isLocal) and tlsOptions == null:
+		Util.PrintLog("Server", "FATAL: missing %s/%s — refusing insecure public bind" % [NetworkCommons.ServerCertPath, NetworkCommons.ServerKeyPath])
+		assert(false, "TLS certificate required for public server (SOM-IDLE A2)")
+		return
 
 	multiplayerAPI.auth_callback = _ValidateAuth
 	multiplayerAPI.auth_timeout = NetworkCommons.LoginAttemptTimeout

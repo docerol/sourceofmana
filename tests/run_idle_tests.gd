@@ -43,6 +43,18 @@ func _run_tests():
 	var sql : Node = launcher.SQL
 	var economy : Node = launcher.Economy
 
+	# SOM-IDLE: janitor de órfãos entre runs (testing.db persiste; char_ids
+	# reciclados ressuscitariam stacks pré-lots e guilds fantasmas).
+	# Ledger/telemetria são append-only e ficam (reconcile tem escopo p/ vivos).
+	sql.ExecuteBindings("DELETE FROM item WHERE char_id NOT IN (SELECT char_id FROM character);", [])
+	sql.ExecuteBindings("DELETE FROM item_instance WHERE char_id NOT IN (SELECT char_id FROM character);", [])
+	sql.ExecuteBindings("DELETE FROM chest_instance WHERE char_id NOT IN (SELECT char_id FROM character);", [])
+	sql.ExecuteBindings("DELETE FROM guild_member WHERE guild_id IN (SELECT guild_id FROM guild WHERE leader_account NOT IN (SELECT account_id FROM account));", [])
+	sql.ExecuteBindings("DELETE FROM guild_vault WHERE guild_id IN (SELECT guild_id FROM guild WHERE leader_account NOT IN (SELECT account_id FROM account));", [])
+	sql.ExecuteBindings("DELETE FROM guild_vault_log WHERE guild_id IN (SELECT guild_id FROM guild WHERE leader_account NOT IN (SELECT account_id FROM account));", [])
+	sql.ExecuteBindings("DELETE FROM guild WHERE leader_account NOT IN (SELECT account_id FROM account);", [])
+	sql.ExecuteBindings("DELETE FROM auction_listing WHERE status = 'open' AND seller_char NOT IN (SELECT char_id FROM character);", [])
+
 	# Load suites dynamically (post-boot, so project classes compile fine)
 	var suitesScript : GDScript = load("res://tests/IdleTests.gd")
 	var suites : RefCounted = suitesScript.new()
@@ -82,10 +94,27 @@ func _run_tests():
 			suites.SuiteTrade(sql, f4a, f4b, acctA, acctB)
 			suites.SuiteChests(sql, f4a, acctA)
 			suites.SuiteVIPCheckout(sql, f4a, acctA)
+			# SOM-IDLE: B1 item lots + B2 chest odds + B3 wipe baseline + C1 grants + D2 telemetry
+			suites.SuiteItemLots(sql)
+			suites.SuiteChestOdds(sql)
+			suites.SuiteWipeB3(sql)
+			suites.SuiteGrantQueue(sql)
+			suites.SuiteTelemetry(sql)
+			suites.SuiteFraud(sql)
+			# SOM-IDLE: E guilds + AH/seasons
+			suites.SuiteGuilds(sql)
+			suites.SuiteSeasonAH(sql)
+
+		# SOM-IDLE: A1 auth hardening + A2 ops hardening
+		suites.SuiteAuthHardening(sql)
+		suites.SuiteOpsA2(sql)
 
 		# §7.4 deterministic live farm sim (zone 1) — after the DB suites so the
 		# fixture character is already leveled by the settle
 		await suites.SuiteIdlePolicySim(suites.lastCharID)
+		# SOM-IDLE: D1 pacing (harness fast; real-time probe ~5min, binding gate)
+		suites.SuiteFaucetHarness(sql)
+		await suites.SuiteIdlePolicyRealTime(sql)
 	else:
 		print("FATAL: DB not initialized — DB-backed suites skipped")
 

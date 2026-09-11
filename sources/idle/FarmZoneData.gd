@@ -13,7 +13,12 @@ const MAX_TIER : int = 8
 const XpBasePerKill : int = 1200
 const XpGrowthPerZone : float = 1.25
 const GoldPerKillDiv : int = 8
-const ParBaseSeconds : int = 6
+# SOM-IDLE D1: par medido em tempo real (diag 120s @1x + probe 300s @1x, char L1
+# fresh com farm vigor: média ~72 kills/h na zona 1, banda observada 36–90).
+# O par 600/h anterior era fantasia de design (6s/kill); a taxa real é dominada
+# por stamina/regen e hit-landing do melee. xpPerKill NÃO muda — o pacing de XP
+# do onboarding está preservado.
+const ParBaseSeconds : float = 50.0
 const ParPerZoneSeconds : float = 0.25
 
 # Tier pacing (power score gates; F2 stores them, F3/F4 enforce soft gating)

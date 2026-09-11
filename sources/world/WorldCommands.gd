@@ -55,6 +55,15 @@ func RegisterCommands():
 	CommandManager.Register("chests", CommandChests, ActorCommons.Permission.NONE, "chests" )
 	CommandManager.Register("openchest", CommandOpenChest, ActorCommons.Permission.NONE, "openchest <chest_id>" )
 	CommandManager.Register("trade", CommandTrade, ActorCommons.Permission.NONE, "trade <player> <item_id> [count=1]" )
+	# SOM-IDLE: D3 — CS panel (procurar transação/item, fila de revisão)
+	CommandManager.Register("cs_trans", CommandCsTrans, ActorCommons.Permission.GM, "cs_trans <account> [limit]" )
+	CommandManager.Register("cs_item", CommandCsItem, ActorCommons.Permission.GM, "cs_item <uid>" )
+	CommandManager.Register("cs_flags", CommandCsFlags, ActorCommons.Permission.GM, "cs_flags" )
+	CommandManager.Register("cs_flag", CommandCsFlag, ActorCommons.Permission.GM, "cs_flag <id> <reviewed|dismissed>" )
+	# SOM-IDLE: E1/E2 — guilds, auction house, seasons
+	CommandManager.Register("guild", CommandGuild, ActorCommons.Permission.NONE, "guild create|join|leave|info|deposit|withdraw|levelup|top ..." )
+	CommandManager.Register("ah", CommandAH, ActorCommons.Permission.NONE, "ah list|buy|cancel|browse ..." )
+	CommandManager.Register("season", CommandSeason, ActorCommons.Permission.NONE, "season active|board ..." )
 
 static func UnregisterCommands():
 	CommandManager.Unregister("spawn")
@@ -109,6 +118,15 @@ static func UnregisterCommands():
 	CommandManager.Unregister("openchest")
 	CommandManager.Unregister("trade")
 	CommandManager.Unregister("gems")
+	# SOM-IDLE: D3
+	CommandManager.Unregister("cs_trans")
+	CommandManager.Unregister("cs_item")
+	CommandManager.Unregister("cs_flags")
+	CommandManager.Unregister("cs_flag")
+	# SOM-IDLE: E1/E2
+	CommandManager.Unregister("guild")
+	CommandManager.Unregister("ah")
+	CommandManager.Unregister("season")
 
 # SOM-IDLE: F3 — zone map listing with power gates ("/zones")
 func CommandZones(caller : PlayerAgent) -> bool:
@@ -178,6 +196,8 @@ func CommandChests(caller : PlayerAgent) -> bool:
 		return true
 	var list : PackedStringArray = PackedStringArray()
 	list.append("Closed chests: %s" % ", ".join(chests.map(func(c : Dictionary) -> String: return str(c["id"]))))
+	# SOM-IDLE B2: odds públicas antes de abrir (compliance loot box).
+	list.append("Odds: " + Launcher.Economy.FormatChestOdds(Launcher.Economy.GetChestOddsForCharacter(caller.GetCharacterID())))
 	Network.CommandFeedback("\n".join(list), caller.peerID)
 	return true
 
@@ -227,6 +247,234 @@ func CommandTrade(caller : PlayerAgent, arg : String = "") -> bool:
 		Network.CommandFeedback("Trade failed: check your items and gem balance", caller.peerID)
 		return false
 	Network.CommandFeedback("Player '%s' not found" % targetNick, caller.peerID)
+	return false
+
+# SOM-IDLE: D3 — CS panel (thin wrappers over SQL reads; permission GM).
+func CommandCsTrans(caller : PlayerAgent, arg : String = "") -> bool:
+	if not caller:
+		return false
+	var parts : PackedStringArray = arg.strip_edges().split(" ", false)
+	if parts.is_empty():
+		Network.CommandFeedback("Usage: /cs_trans <account> [limit]", caller.peerID)
+		return false
+	var accountID : int = Launcher.SQL.GetAccountID(parts[0])
+	if accountID == NetworkCommons.PeerUnknownID:
+		Network.CommandFeedback("Account '%s' not found" % parts[0], caller.peerID)
+		return false
+	var limit : int = parts[1].to_int() if parts.size() > 1 else 10
+	var rows : Array = Launcher.SQL.SearchLedger(accountID, limit)
+	if rows.is_empty():
+		Network.CommandFeedback("No transactions for %s" % parts[0], caller.peerID)
+		return true
+	var lines : PackedStringArray = PackedStringArray()
+	for row in rows:
+		lines.append("#%d %s %+d (bal %d) %s" % [int(row["id"]), str(row["kind"]), int(row["amount"]), int(row["balance_after"]), str(row["reason"])])
+	Network.CommandFeedback("\n".join(lines), caller.peerID)
+	return true
+
+func CommandCsItem(caller : PlayerAgent, arg : String = "") -> bool:
+	if not caller:
+		return false
+	var uid : int = arg.strip_edges().to_int()
+	if uid <= 0:
+		Network.CommandFeedback("Usage: /cs_item <uid>", caller.peerID)
+		return false
+	var chain : Array = Launcher.SQL.LotHistory(uid)
+	if chain.is_empty():
+		Network.CommandFeedback("Lot %d not found" % uid, caller.peerID)
+		return false
+	var lines : PackedStringArray = PackedStringArray()
+	for lot in chain:
+		lines.append("uid %d: char %d item %d x%d (%s, parent %d)" % [int(lot["uid"]), int(lot["char_id"]), int(lot["item_id"]), int(lot["count"]), str(lot["reason"]), int(lot["parent_uid"])])
+	Network.CommandFeedback("\n".join(lines), caller.peerID)
+	return true
+
+func CommandCsFlags(caller : PlayerAgent) -> bool:
+	if not caller:
+		return false
+	var rows : Array = Launcher.SQL.ListFraudFlags("open")
+	if rows.is_empty():
+		Network.CommandFeedback("No open fraud flags", caller.peerID)
+		return true
+	var lines : PackedStringArray = PackedStringArray()
+	for row in rows:
+		lines.append("#%d %s acct %d char %d: %s" % [int(row["id"]), str(row["kind"]), int(row["account_id"]), int(row["char_id"]), str(row["detail"])])
+	Network.CommandFeedback("\n".join(lines), caller.peerID)
+	return true
+
+func CommandCsFlag(caller : PlayerAgent, arg : String = "") -> bool:
+	if not caller:
+		return false
+	var parts : PackedStringArray = arg.strip_edges().split(" ", false)
+	if parts.size() < 2:
+		Network.CommandFeedback("Usage: /cs_flag <id> <reviewed|dismissed>", caller.peerID)
+		return false
+	if Launcher.SQL.ReviewFraudFlag(parts[0].to_int(), parts[1]):
+		Network.CommandFeedback("Flag #%d -> %s" % [parts[0].to_int(), parts[1]], caller.peerID)
+		return true
+	Network.CommandFeedback("Flag not found, already closed, or bad status", caller.peerID)
+	return false
+
+# SOM-IDLE: E1/E2 — guilds, auction house, seasons (subcommand routers).
+func CommandGuild(caller : PlayerAgent, arg : String = "") -> bool:
+	if not caller:
+		return false
+	var parts : PackedStringArray = arg.strip_edges().split(" ", false)
+	if parts.is_empty():
+		Network.CommandFeedback("Usage: /guild create <name> | join <id> | leave | info | deposit <item> <n> | withdraw <item> <n> | levelup | top", caller.peerID)
+		return false
+	var accountID : int = Peers.GetAccount(caller.peerID)
+	var charID : int = caller.GetCharacterID()
+	match parts[0]:
+		"create":
+			if parts.size() < 2:
+				Network.CommandFeedback("Usage: /guild create <name> (cost: 5000 gold)", caller.peerID)
+				return false
+			var guildID : int = Launcher.Economy.CreateGuild(accountID, charID, " ".join(parts.slice(1)))
+			Network.CommandFeedback("Guild created (#%d)" % guildID if guildID > 0 else "Could not create guild (name taken, already in one, or no gold)", caller.peerID)
+			return guildID > 0
+		"join":
+			if parts.size() < 2 or not Launcher.Economy.JoinGuild(accountID, parts[1].to_int()):
+				Network.CommandFeedback("Usage: /guild join <id>", caller.peerID)
+				return false
+			Network.CommandFeedback("Joined guild #%s" % parts[1], caller.peerID)
+			return true
+		"leave":
+			if Launcher.Economy.LeaveGuild(accountID):
+				Network.CommandFeedback("You left the guild", caller.peerID)
+				return true
+			Network.CommandFeedback("Could not leave (vault must be empty to disband)", caller.peerID)
+			return false
+		"info":
+			var guildID : int = Launcher.Economy.GetGuildForAccount(accountID)
+			if guildID == 0:
+				Network.CommandFeedback("You are in no guild", caller.peerID)
+				return true
+			var guild : Dictionary = Launcher.Economy.GetGuild(guildID)
+			Network.CommandFeedback("Guild %s (#%d): level %d, %d points, your rank: %s" % [str(guild.get("name", "?")), guildID, int(guild.get("level", 1)), int(guild.get("points", 0)), Launcher.Economy.GetMemberRank(accountID)], caller.peerID)
+			return true
+		"deposit":
+			if parts.size() < 3 or not Launcher.Economy.DepositToVault(accountID, charID, parts[1].to_int(), parts[2].to_int()):
+				Network.CommandFeedback("Usage: /guild deposit <item> <count>", caller.peerID)
+				return false
+			Network.CommandFeedback("Deposited %sx item %s" % [parts[2], parts[1]], caller.peerID)
+			return true
+		"withdraw":
+			if parts.size() < 3 or not Launcher.Economy.WithdrawFromVault(accountID, charID, parts[1].to_int(), parts[2].to_int()):
+				Network.CommandFeedback("Usage: /guild withdraw <item> <count> (officers+)", caller.peerID)
+				return false
+			Network.CommandFeedback("Withdrew %sx item %s" % [parts[2], parts[1]], caller.peerID)
+			return true
+		"levelup":
+			if Launcher.Economy.LevelUpGuild(accountID, charID):
+				Network.CommandFeedback("Guild leveled up", caller.peerID)
+				return true
+			Network.CommandFeedback("Could not level up (officers+, check gold/gems)", caller.peerID)
+			return false
+		"top":
+			var rows : Array = Launcher.Economy.GetGuildLeaderboard(10)
+			if rows.is_empty():
+				Network.CommandFeedback("No guilds yet", caller.peerID)
+				return true
+			var lines : PackedStringArray = PackedStringArray()
+			for row in rows:
+				lines.append("#%d %s — Lv%d, %d pts, %d members" % [int(row["guild_id"]), str(row["name"]), int(row["level"]), int(row["points"]), int(row["members"])])
+			Network.CommandFeedback("\n".join(lines), caller.peerID)
+			return true
+	Network.CommandFeedback("Unknown /guild subcommand", caller.peerID)
+	return false
+
+func CommandAH(caller : PlayerAgent, arg : String = "") -> bool:
+	if not caller:
+		return false
+	var parts : PackedStringArray = arg.strip_edges().split(" ", false)
+	if parts.is_empty():
+		Network.CommandFeedback("Usage: /ah list <item> <n> <price> | buy <id> | cancel <id> | browse", caller.peerID)
+		return false
+	var charID : int = caller.GetCharacterID()
+	match parts[0]:
+		"list":
+			if parts.size() < 4:
+				Network.CommandFeedback("Usage: /ah list <item> <count> <price_gold> (fee: 5 gems)", caller.peerID)
+				return false
+			var listing : int = Launcher.Economy.ListItemForSale(charID, parts[1].to_int(), parts[2].to_int(), parts[3].to_int())
+			Network.CommandFeedback("Listed (#%d)" % listing if listing > 0 else "Could not list (stock, gems, or 5 open max)", caller.peerID)
+			return listing > 0
+		"buy":
+			if parts.size() < 2 or not Launcher.Economy.BuyListing(charID, parts[1].to_int()):
+				Network.CommandFeedback("Usage: /ah buy <id>", caller.peerID)
+				return false
+			Network.CommandFeedback("Bought listing #%s" % parts[1], caller.peerID)
+			return true
+		"cancel":
+			if parts.size() < 2 or not Launcher.Economy.CancelListing(charID, parts[1].to_int()):
+				Network.CommandFeedback("Usage: /ah cancel <id> (your listings only)", caller.peerID)
+				return false
+			Network.CommandFeedback("Listing #%s cancelled (items back, fee kept)" % parts[1], caller.peerID)
+			return true
+		"browse":
+			var rows : Array = Launcher.Economy.BrowseListings(20)
+			if rows.is_empty():
+				Network.CommandFeedback("No open listings", caller.peerID)
+				return true
+			var lines : PackedStringArray = PackedStringArray()
+			for row in rows:
+				lines.append("#%d: %dx item %d — %d gold" % [int(row["id"]), int(row["count"]), int(row["item_id"]), int(row["price_gold"])])
+			Network.CommandFeedback("\n".join(lines), caller.peerID)
+			return true
+	Network.CommandFeedback("Unknown /ah subcommand", caller.peerID)
+	return false
+
+func CommandSeason(caller : PlayerAgent, arg : String = "") -> bool:
+	if not caller:
+		return false
+	var parts : PackedStringArray = arg.strip_edges().split(" ", false)
+	if parts.is_empty():
+		Network.CommandFeedback("Usage: /season active | board <power|spend> (GMs: create <days> | close)", caller.peerID)
+		return false
+	match parts[0]:
+		"active":
+			var season : Dictionary = Launcher.Economy.ActiveSeason()
+			if season.is_empty():
+				Network.CommandFeedback("No active season", caller.peerID)
+				return true
+			Network.CommandFeedback("Season #%d ends %s" % [int(season["season_id"]), Time.get_datetime_string_from_unix_time(int(season["ends_at"]))], caller.peerID)
+			return true
+		"board":
+			if parts.size() < 2:
+				Network.CommandFeedback("Usage: /season board <power|spend>", caller.peerID)
+				return false
+			var season2 : Dictionary = Launcher.Economy.ActiveSeason()
+			if season2.is_empty():
+				Network.CommandFeedback("No active season", caller.peerID)
+				return false
+			var rows : Array = Launcher.Economy.GetSeasonBoard(int(season2["season_id"]), parts[1], 10)
+			if rows.is_empty():
+				Network.CommandFeedback("Empty board (snapshot pending)", caller.peerID)
+				return true
+			var lines : PackedStringArray = PackedStringArray()
+			for row in rows:
+				lines.append("%d: %d" % [int(row["subject_id"]), int(row["value"])])
+			Network.CommandFeedback("\n".join(lines), caller.peerID)
+			return true
+		"create", "close":
+			if Peers.GetPermission(caller.peerID) < ActorCommons.Permission.GM:
+				Network.CommandFeedback("GMs only", caller.peerID)
+				return false
+			if parts[0] == "create":
+				if parts.size() < 2:
+					Network.CommandFeedback("Usage: /season create <days>", caller.peerID)
+					return false
+				var seasonID : int = Launcher.Economy.CreateSeason(parts[1].to_int())
+				Network.CommandFeedback("Season #%d started" % seasonID if seasonID > 0 else "Could not create (one already active?)", caller.peerID)
+				return seasonID > 0
+			var season3 : Dictionary = Launcher.Economy.ActiveSeason()
+			if season3.is_empty() or not Launcher.Economy.CloseSeason(int(season3["season_id"])):
+				Network.CommandFeedback("No active season to close", caller.peerID)
+				return false
+			Network.CommandFeedback("Season closed", caller.peerID)
+			return true
+	Network.CommandFeedback("Unknown /season subcommand", caller.peerID)
 	return false
 
 # SOM-IDLE: F2 — start/stop an idle farming session ("/farm <zone>" / "/farm stop")

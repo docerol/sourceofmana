@@ -26,6 +26,12 @@ const EfficiencySampleMinInterval : float = 5.0
 const DeathPenalty : float = 0.05
 const MinEfficiency : float = 0.5
 const RespawnDelay : float = 2.0
+# SOM-IDLE D1: farm vigor — policy-driven agents regen stamina/mana fast
+# enough to sustain auto-combat (a melee swing costs 10 stamina; base regen
+# starves a L1 farmer after ~5 swings and 99% of casts fizzle). Farm instances
+# are idle-only, so this never touches live balance, damage or power score.
+const FarmVigorStaminaPct : float = 0.5
+const FarmVigorManaPct : float = 0.5
 
 #
 var agent : PlayerAgent						= null
@@ -38,6 +44,15 @@ var sessionGameTime : float					= 0.0
 var sessionKills : int						= 0
 var sessionDeaths : int						= 0
 var sessionDowntimeSecs : float				= 0.0
+
+# SOM-IDLE D1: pacing instrumentation (where does farm time go?).
+var metricSeekTicks : int						= 0
+var metricCombatTicks : int					= 0
+var metricLootTicks : int						= 0
+var metricNoTargetTicks : int					= 0
+var metricAttacksCast : int					= 0
+var metricWalkDistance : float					= 0.0
+var _metricLastPos : Vector2					= Vector2.ZERO
 
 var currentTargetRID : int					= 0
 var skillLoadout : Array[int]				= []
@@ -77,7 +92,14 @@ func Setup(pAgent : PlayerAgent, pZoneID : int):
 	sessionKills = 0
 	sessionDeaths = 0
 	sessionDowntimeSecs = 0.0
+	metricSeekTicks = 0
+	metricCombatTicks = 0
+	metricLootTicks = 0
+	metricNoTargetTicks = 0
+	metricAttacksCast = 0
+	metricWalkDistance = 0.0
 	_lastPosition = agent.position if agent else Vector2.ZERO
+	_metricLastPos = _lastPosition
 
 func Halt():
 	halted = true
@@ -93,21 +115,38 @@ func Tick(delta : float):
 
 	_accumulator += delta
 	sessionGameTime += delta
+	if agent:
+		metricWalkDistance += agent.position.distance_to(_metricLastPos)
+		_metricLastPos = agent.position
+	_tickVigor(delta)
 
 	match state:
 		State.IDLE:
 			state = State.SEEK
 		State.SEEK:
+			metricSeekTicks += 1
 			_tickSeek(delta)
 		State.COMBAT:
+			metricCombatTicks += 1
 			_tickCombat(delta)
 		State.LOOT:
+			metricLootTicks += 1
 			_tickLoot(delta)
 		State.DEAD:
 			_tickDead(delta)
 
 	_tickStuck(delta)
 	_tickPotion(delta)
+
+func _tickVigor(delta : float):
+	if agent == null or agent.stat == null or not ActorCommons.IsAlive(agent):
+		return
+	var maxStam : int = agent.stat.current.maxStamina
+	if maxStam > 0 and agent.stat.stamina < maxStam:
+		agent.stat.SetStamina(maxi(1, int(float(maxStam) * FarmVigorStaminaPct * delta)))
+	var maxMana : int = agent.stat.current.maxMana
+	if maxMana > 0 and agent.stat.mana < maxMana:
+		agent.stat.SetMana(maxi(1, int(float(maxMana) * FarmVigorManaPct * delta)))
 
 func _isValid() -> bool:
 	if agent == null or not is_instance_valid(agent):
@@ -148,6 +187,7 @@ func _tickSeek(delta : float):
 		state = State.COMBAT
 		return
 
+	metricNoTargetTicks += 1
 	# No mobs: wander toward instance center to stay in the farm area
 	var inst : WorldInstance = _getInst()
 	if inst and agent.agent and not agent.agent.is_navigation_finished():
@@ -202,9 +242,13 @@ func _tickCombat(delta : float):
 	if dist > range:
 		agent.WalkToward(target.position)
 	else:
-		if not SkillCommons.HasAnyActionInProgress(agent):
+		# SOM-IDLE D1: chama Cast só quando um cast real pode começar
+		# (predicados do próprio motor). Sem isso cada tick empilha um timer
+		# que morre no Process — milhares de timers/seg por farmer no servidor.
+		if not SkillCommons.HasAnyActionInProgress(agent) and not SkillCommons.IsCasting(agent) and not SkillCommons.IsCoolingDown(agent, skill):
 			Skill.Cast(agent, target, skill)
 			_attackedTarget = true
+			metricAttacksCast += 1
 
 	# Kill detection: target died between ticks
 	if not ActorCommons.IsAlive(target):
@@ -319,6 +363,22 @@ func ComputeSessionEfficiency() -> float:
 
 func GetSessionDuration() -> float:
 	return sessionGameTime
+
+# SOM-IDLE D1: pacing breakdown for the sim suites (all game-time based).
+func SnapshotMetrics() -> Dictionary:
+	var hours : float = maxf(1.0 / 3600.0, sessionGameTime / 3600.0)
+	return {
+		"kills" = sessionKills,
+		"kills_per_hour" = float(sessionKills) / hours,
+		"seek_ticks" = metricSeekTicks,
+		"combat_ticks" = metricCombatTicks,
+		"loot_ticks" = metricLootTicks,
+		"no_target_ticks" = metricNoTargetTicks,
+		"attacks_cast" = metricAttacksCast,
+		"walk_distance" = metricWalkDistance,
+		"secs_per_kill" = sessionGameTime / maxf(1.0, float(sessionKills)),
+		"attacks_per_kill" = float(metricAttacksCast) / maxf(1.0, float(sessionKills)),
+	}
 
 # Used by tests to inject deterministic downtime
 func _addDowntime(secs : float):

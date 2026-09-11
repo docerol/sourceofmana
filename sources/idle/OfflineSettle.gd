@@ -68,6 +68,9 @@ static func _sql() -> SQLService:
 static func _economy() -> EconomyService:
 	return economyOverride if economyOverride else Launcher.Economy
 
+static func _telemetry() -> TelemetryService:
+	return Launcher.Telemetry
+
 static func _now() -> int:
 	return nowOverride if nowOverride > 0 else SQLCommons.Timestamp()
 
@@ -135,6 +138,10 @@ static func GetModsForAccount(accountID : int, now : int = 0) -> float:
 		var vipUntil : int = sql.GetVIPUntil(accountID)
 		if vipUntil > now:
 			mods *= VIPModFactor
+		# SOM-IDLE E1: buff de guild (2%/nível a partir do 2) no faucet idle.
+		var eco : EconomyService = _economy()
+		if eco:
+			mods *= eco.GuildBuffForAccount(accountID)
 	return mods
 
 static func _ApplyFormula(sql : SQLService, report : SettleReport):
@@ -225,6 +232,14 @@ static func _Apply(sql : SQLService, report : SettleReport) -> bool:
 
 		return true):
 		applied = true
+	# SOM-IDLE D2: product telemetry (fora da transação, best-effort).
+	var tele : TelemetryService = _telemetry()
+	if tele:
+		tele.Record("settle", report.accountID, report.charID, report.xpEarned,
+			JSON.stringify({"zone" = report.zoneID, "hours" = report.hours, "eff" = report.efficiency, "gold" = report.goldEarned, "mods" = report.mods}))
+		if report.levelsGained > 0:
+			tele.Record("levelup", report.accountID, report.charID, report.levelsGained,
+				JSON.stringify({"zone" = report.zoneID, "from" = report.newLevel - report.levelsGained, "to" = report.newLevel, "hours" = report.hours}))
 	return applied
 
 static func _UpdateAnchor(sql : SQLService, charID : int, now : int):

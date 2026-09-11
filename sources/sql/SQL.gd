@@ -39,14 +39,21 @@ func ApplyMigration(migrationFile : String):
 
 # Accounts
 func AddAccount(username : String, password : String, email : String) -> bool:
+	# SOM-IDLE A1: e-mail obrigatório e único (base do tier anti-RMT + recuperação).
+	if email.is_empty() or HasEmail(email):
+		return false
 	var salt : String = Hasher.GenerateSalt()
-	var hashedPassword : String = Hasher.HashPassword(password, salt)
+	var hashedPassword : String = Hasher.HashPasswordV1(password, salt)
 
 	var accountData : Dictionary = {
 		"username" : username,
 		"password_salt" : salt,
 		"password" : hashedPassword,
+		"hash_ver" : Hasher.HashVersion,
 		"email" : email,
+		"email_verified" : 0,
+		"failed_attempts" : 0,
+		"locked_until" : 0,
 		"created_timestamp" : SQLCommons.Timestamp()
 	}
 	return db.insert_row("account", accountData)
@@ -58,20 +65,120 @@ func HasAccount(username : String) -> bool:
 	return not QueryBindings("SELECT account_id FROM account WHERE username = ?;", [username]).is_empty()
 
 func ValidateAuthPassword(username : String, triedPassword : String) -> Peers.AccountData:
-	var results : Array[Dictionary] = QueryBindings("SELECT account_id, password, password_salt, permission FROM account WHERE username = ?;", [username])
+	var results : Array[Dictionary] = QueryBindings("SELECT account_id, password, password_salt, permission, hash_ver, failed_attempts, locked_until FROM account WHERE username = ?;", [username])
 	assert(results.size() <= 1, "Duplicated account row")
-	if not results.is_empty():
-		var salt = results[0].get("password_salt", null)
-		var correctPassword = results[0].get("password", null)
-		var accountID = results[0].get("account_id", null)
-		if salt and correctPassword and accountID and salt is String and correctPassword is String and accountID is int:
-			var hashedTriedPassword : String = Hasher.HashPassword(triedPassword, salt)
-			if hashedTriedPassword == correctPassword:
-				var permission = results[0].get("permission", null)
-				if not permission:
-					permission = ActorCommons.Permission.NONE
-				return Peers.AccountData.new(accountID, permission)
-	return null
+	if results.is_empty():
+		return null
+	var row : Dictionary = results[0]
+	# SOM-IDLE A1: conta travada recusa sem verificar a senha (anti-enumeration de timing).
+	if int(row.get("locked_until", 0)) > SQLCommons.Timestamp():
+		return null
+	var salt = row.get("password_salt", null)
+	var correctPassword = row.get("password", null)
+	var accountID = row.get("account_id", null)
+	if not (salt is String and correctPassword is String and accountID is int):
+		return null
+	var hashVer : int = int(row.get("hash_ver", 0))
+	if not Hasher.VerifyPassword(triedPassword, salt, correctPassword, hashVer):
+		RecordFailedLogin(accountID, int(row.get("failed_attempts", 0)))
+		return null
+	ResetFailedLogins(accountID)
+	if hashVer < Hasher.HashVersion:
+		var newSalt : String = Hasher.GenerateSalt()
+		var newHash : String = Hasher.HashPasswordV1(triedPassword, newSalt)
+		ExecuteBindings("UPDATE account SET password = ?, password_salt = ?, hash_ver = ? WHERE account_id = ?;", [newHash, newSalt, Hasher.HashVersion, accountID])
+	var permission = row.get("permission", null)
+	if not permission:
+		permission = ActorCommons.Permission.NONE
+	return Peers.AccountData.new(accountID, permission)
+
+# SOM-IDLE A1: backoff exponencial anti-bruteforce + unicidade de e-mail + LGPD.
+func RecordFailedLogin(accountID : int, prevAttempts : int) -> void:
+	var attempts : int = prevAttempts + 1
+	var lockedUntil : int = 0
+	if attempts >= NetworkCommons.MaxLoginAttempts:
+		var shift : int = mini(attempts - NetworkCommons.MaxLoginAttempts, 10)
+		lockedUntil = SQLCommons.Timestamp() + mini(NetworkCommons.BaseLockoutSec * (1 << shift), NetworkCommons.MaxLockoutSec)
+	ExecuteBindings("UPDATE account SET failed_attempts = ?, locked_until = ? WHERE account_id = ?;", [attempts, lockedUntil, accountID])
+
+func ResetFailedLogins(accountID : int) -> void:
+	ExecuteBindings("UPDATE account SET failed_attempts = 0, locked_until = 0 WHERE account_id = ?;", [accountID])
+
+func IsLockedOut(accountID : int) -> bool:
+	var rows : Array[Dictionary] = QueryBindings("SELECT locked_until FROM account WHERE account_id = ?;", [accountID])
+	return not rows.is_empty() and int(rows[0].get("locked_until", 0)) > SQLCommons.Timestamp()
+
+func HasEmail(email : String) -> bool:
+	return not QueryBindings("SELECT account_id FROM account WHERE email = ?;", [email]).is_empty()
+
+func GetAccountIDByEmail(email : String) -> int:
+	var rows : Array[Dictionary] = QueryBindings("SELECT account_id FROM account WHERE email = ?;", [email])
+	return int(rows[0].get("account_id", NetworkCommons.PeerUnknownID)) if not rows.is_empty() else NetworkCommons.PeerUnknownID
+
+func IsEmailVerified(accountID : int) -> bool:
+	var rows : Array[Dictionary] = QueryBindings("SELECT email_verified FROM account WHERE account_id = ?;", [accountID])
+	return not rows.is_empty() and int(rows[0].get("email_verified", 0)) == 1
+
+# SOM-IDLE D3: raw antifraud reads (db direto — chamáveis dentro de Transaction()).
+func IsEmailVerifiedRaw(accountID : int) -> bool:
+	var rows : Array = db.select_rows("account", "account_id = %d" % accountID, ["email_verified"])
+	return not rows.is_empty() and int(rows[0].get("email_verified", 0)) == 1
+
+func LastTradeTimestampRaw(charID : int) -> int:
+	if not db.query_with_bindings("SELECT COALESCE(MAX(created_at), 0) AS t FROM ledger_transaction WHERE char_id = ? AND (reason LIKE 'trade_out:%' OR reason LIKE 'trade_in:%');", [charID]):
+		return 0
+	var res : Array = db.query_result
+	return int(res[0].get("t", 0)) if not res.is_empty() else 0
+
+func TradeCountTodayRaw(accountID : int, nowSec : int = 0) -> int:
+	var now : int = nowSec if nowSec > 0 else SQLCommons.Timestamp()
+	var dayStart : int = now - (now % 86400)
+	if not db.query_with_bindings("SELECT COUNT(*) AS n FROM ledger_transaction WHERE account_id = ? AND reason LIKE 'trade_out:%' AND created_at >= ?;", [accountID, dayStart]):
+		return 999
+	var res : Array = db.query_result
+	return int(res[0].get("n", 999)) if not res.is_empty() else 999
+
+# SOM-IDLE D3: CS reads (suporte — fora de transação, via bindings).
+func SearchLedger(accountID : int, limit : int = 20) -> Array[Dictionary]:
+	return QueryBindings("SELECT id, char_id, kind, amount, balance_after, reason, created_at FROM ledger_transaction WHERE account_id = ? ORDER BY id DESC LIMIT ?;", [accountID, mini(limit, 100)])
+
+func GetItemLot(uid : int) -> Dictionary:
+	var rows : Array[Dictionary] = QueryBindings("SELECT uid, char_id, item_id, count, bound, reason, parent_uid, created_at FROM item_instance WHERE uid = ?;", [uid])
+	return {} if rows.is_empty() else rows[0]
+
+func LotHistory(uid : int, maxHops : int = 20) -> Array[Dictionary]:
+	# Caminha parent_uid para cima (origem do item — grafo RMT).
+	var chain : Array[Dictionary] = []
+	var seen : Dictionary = {}
+	var current : int = uid
+	while current > 0 and chain.size() < maxHops and not seen.has(current):
+		seen[current] = true
+		var lot : Dictionary = GetItemLot(current)
+		if lot.is_empty():
+			break
+		chain.append(lot)
+		current = int(lot.get("parent_uid", 0))
+	return chain
+
+func ListFraudFlags(status : String = "open", limit : int = 50) -> Array[Dictionary]:
+	return QueryBindings("SELECT id, created_at, account_id, char_id, kind, detail, status FROM fraud_flag WHERE status = ? ORDER BY id DESC LIMIT ?;", [status, mini(limit, 100)])
+
+func ReviewFraudFlag(flagID : int, status : String) -> bool:
+	if status != "reviewed" and status != "dismissed":
+		return false
+	# NOTE: query_with_bindings relata sucesso com 0 linhas afetadas (armadilha
+	# F3) — o gate de existência garante que só flag aberta muda de estado.
+	if QueryBindings("SELECT id FROM fraud_flag WHERE id = ? AND status = 'open';", [flagID]).is_empty():
+		return false
+	return ExecuteBindings("UPDATE fraud_flag SET status = ? WHERE id = ?;", [status, flagID])
+func SetEmailVerified(accountID : int, verified : bool = true) -> bool:
+	return ExecuteBindings("UPDATE account SET email_verified = ? WHERE account_id = ?;", [1 if verified else 0, accountID])
+
+func DeleteAccountData(accountID : int) -> bool:
+	# LGPD art. 18: anonimiza em vez de hard delete (ledger append-only preserva histórico).
+	var salt : String = Hasher.GenerateSalt()
+	var filler : String = Hasher.HashPasswordV1(salt, salt)
+	return ExecuteBindings("UPDATE account SET username = ?, email = '', password = ?, password_salt = ?, hash_ver = ?, email_verified = 0, failed_attempts = 0, locked_until = 0 WHERE account_id = ?;", ["deleted_%d" % accountID, filler, salt, Hasher.HashVersion, accountID])
 
 func UpdateAccount(accountID : int, platform : int = NetworkCommons.Platform.UNKNOWN) -> bool:
 	var newTimestamp : int = SQLCommons.Timestamp()
@@ -267,6 +374,76 @@ func UpdateRowsRaw(table : String, conditions : String, data : Dictionary) -> bo
 	var query : String = "UPDATE %s SET %s WHERE %s;" % [table, ", ".join(keys), conditions]
 	return db.query_with_bindings(query, bindings)
 
+# Transaction-safe DELETE (no implicit BEGIN/END — unlike delete_rows)
+func DeleteRowsRaw(table : String, conditions : String) -> bool:
+	return db.query_with_bindings("DELETE FROM %s WHERE %s;" % [table, conditions], [])
+
+# SOM-IDLE: last insert id, raw (para guild/listing criados dentro de Transaction).
+func LastInsertRowIDRaw() -> int:
+	if not db.query("SELECT last_insert_rowid() AS uid;"):
+		return 0
+	var res : Array = db.query_result
+	return int(res[0].get("uid", 0)) if not res.is_empty() else 0
+
+# SOM-IDLE B1: item lots — per-grant identity (anti-duplicação, trade history).
+# Cada concessão cria um lote (uid); consumos decrementam em FIFO e apagam
+# lotes zerados. Invariante: soma dos lotes ativos == stack agregada em item.
+# Raw (db direto, sem mutex): chamável dentro de Transaction() e em paths com
+# mutex próprio. Retorna o uid ou 0.
+func GrantItemLotRaw(charID : int, itemID : int, count : int, reason : String, bound : int = 0, customfield : String = "", parentUID : int = 0) -> int:
+	if count <= 0:
+		return 0
+	if not db.insert_row("item_instance", {
+		"char_id" = charID, "item_id" = itemID, "count" = count,
+		"storage" = 0, "bound" = bound, "customfield" = customfield,
+		"reason" = reason, "parent_uid" = parentUID,
+		"created_at" = SQLCommons.Timestamp()}):
+		return 0
+	if not db.query("SELECT last_insert_rowid() AS uid;"):
+		return 0
+	var res : Array = db.query_result
+	return int(res[0].get("uid", 0)) if not res.is_empty() else 0
+
+func _LotCondition(charID : int, itemID : int, allowBound : bool, customfield : String) -> String:
+	var cond : String = "char_id = %d AND item_id = %d AND storage = 0 AND customfield = '%s'" % [charID, itemID, customfield.replace("'", "''")]
+	if not allowBound:
+		cond += " AND bound = 0"
+	return cond
+
+func GetLotBalanceRaw(charID : int, itemID : int, allowBound : bool = true, customfield : String = "") -> int:
+	if not db.query_with_bindings("SELECT COALESCE(SUM(count), 0) AS total FROM item_instance WHERE " + _LotCondition(charID, itemID, allowBound, customfield) + ";", []):
+		return 0
+	var res : Array = db.query_result
+	return int(res[0].get("total", 0)) if not res.is_empty() else 0
+
+# Consome lotes em FIFO (mais antigo primeiro). Retorna os uids consumidos ou
+# []. Dentro de Transaction(), falhar reverte parciais (all-or-nothing).
+func ConsumeItemLotsRaw(charID : int, itemID : int, count : int, allowBound : bool = false, customfield : String = "") -> Array:
+	if count <= 0:
+		return []
+	var cond : String = _LotCondition(charID, itemID, allowBound, customfield)
+	if GetLotBalanceRaw(charID, itemID, allowBound, customfield) < count:
+		return []
+	if not db.query_with_bindings("SELECT uid, count FROM item_instance WHERE " + cond + " ORDER BY uid;", []):
+		return []
+	var lots : Array = (db.query_result as Array).duplicate()
+	var consumed : Array = []
+	var remaining : int = count
+	for lot in lots:
+		if remaining <= 0:
+			break
+		var uid : int = int(lot["uid"])
+		var have : int = int(lot["count"])
+		var take : int = mini(have, remaining)
+		if take >= have:
+			if not DeleteRowsRaw("item_instance", "uid = %d" % uid):
+				return []
+		elif not UpdateRowsRaw("item_instance", "uid = %d" % uid, {"count" = have - take}):
+			return []
+		consumed.append(uid)
+		remaining -= take
+	return consumed if remaining == 0 else []
+
 # SOM-IDLE: F2 settle — direct stat row writes (level/xp/gold) without an agent
 func UpdateStatDirect(charID : int, newLevel : int, newExperience : int, newGold : int) -> bool:
 	var data : Dictionary = {
@@ -279,11 +456,16 @@ func UpdateStatDirect(charID : int, newLevel : int, newExperience : int, newGold
 # SOM-IDLE: F2 settle — insert settled drops into the character inventory
 # NOTE: uses db.* directly (never QueryBindings) so it stays callable inside
 # Transaction() without re-locking queryMutex.
-func AddItemToCharacter(charID : int, itemID : int, count : int) -> bool:
-	var existing : Array[Dictionary] = db.select_rows("item", "item_id = %d AND char_id = %d AND storage = 0;" % [itemID, charID], ["count"])
+# SOM-IDLE B1: espelha a concessão em item_instance (lote com uid).
+func AddItemToCharacter(charID : int, itemID : int, count : int, reason : String = "settle") -> bool:
+	# NOTE: sem ";" final — select_rows ignora a query silenciosamente com ";" (bug F3).
+	var existing : Array[Dictionary] = db.select_rows("item", "item_id = %d AND char_id = %d AND storage = 0" % [itemID, charID], ["count"])
+	var ok : bool = false
 	if not existing.is_empty():
-		return UpdateRowsRaw("item", "item_id = %d AND char_id = %d AND storage = 0" % [itemID, charID], {"count" = int(existing[0]["count"]) + count})
-	return db.insert_row("item", {"item_id" = itemID, "char_id" = charID, "count" = count, "storage" = 0, "customfield" = ""})
+		ok = UpdateRowsRaw("item", "item_id = %d AND char_id = %d AND storage = 0" % [itemID, charID], {"count" = int(existing[0]["count"]) + count})
+	else:
+		ok = db.insert_row("item", {"item_id" = itemID, "char_id" = charID, "count" = count, "storage" = 0, "customfield" = ""})
+	return ok and GrantItemLotRaw(charID, itemID, count, reason) != 0
 
 # SOM-IDLE: F2 settle — anchor + efficiency reset
 func UpdateSettleAnchor(charID : int, lastSettledAt : int, efficiency : float) -> bool:
@@ -416,7 +598,10 @@ func AddItem(charID : int, itemID : int, customfield : String, itemCount : int =
 	var data : Dictionary = GetItem(charID, itemID, customfield, storageType)
 	# Increment item count
 	if not data.is_empty():
-		return ExecuteBindings("UPDATE item SET count = ? WHERE item_id = ? AND char_id = ? AND storage = ? AND customfield = ?;", [data["count"] + 1, itemID, charID, storageType, customfield])
+		if not ExecuteBindings("UPDATE item SET count = ? WHERE item_id = ? AND char_id = ? AND storage = ? AND customfield = ?;", [data["count"] + 1, itemID, charID, storageType, customfield]):
+			return false
+		# SOM-IDLE B1: journal da concessão (upstream incrementa de 1 em 1 aqui).
+		return true if storageType != 0 else GrantItemLotRaw(charID, itemID, 1, "world", 0, customfield) != 0
 
 	# Insert new item
 	data = {
@@ -426,17 +611,24 @@ func AddItem(charID : int, itemID : int, customfield : String, itemCount : int =
 		"storage": storageType,
 		"customfield": customfield
 	}
-	return db.insert_row("item", data)
+	if not db.insert_row("item", data):
+		return false
+	# SOM-IDLE B1: journal da concessão.
+	return true if storageType != 0 else GrantItemLotRaw(charID, itemID, itemCount, "world", 0, customfield) != 0
 
 func RemoveItem(charID : int, itemID : int, customfield : String, itemCount : int = 1, storageType : int = 0) -> bool:
 	var data : Dictionary = GetItem(charID, itemID, customfield, storageType)
-	if not data.is_empty():
-		# Decrement item count
-		if data["count"] > itemCount:
-			return ExecuteBindings("UPDATE item SET count = ? WHERE item_id = ? AND char_id = ? AND storage = ? AND customfield = ?;", [data["count"] - itemCount, itemID, charID, storageType, customfield])
-		# Remove item
-		elif data["count"] == itemCount:
-			return ExecuteBindings("DELETE FROM item WHERE item_id = ? AND char_id = ? AND storage = ? AND customfield = ?;", [itemID, charID, storageType, customfield])
+	if data.is_empty():
+		return false
+	# SOM-IDLE B1: consome os lotes primeiro (rejeita sem lotes suficientes).
+	if storageType == 0 and ConsumeItemLotsRaw(charID, itemID, itemCount, true, customfield).is_empty():
+		return false
+	# Decrement item count
+	if data["count"] > itemCount:
+		return ExecuteBindings("UPDATE item SET count = ? WHERE item_id = ? AND char_id = ? AND storage = ? AND customfield = ?;", [data["count"] - itemCount, itemID, charID, storageType, customfield])
+	# Remove item
+	elif data["count"] == itemCount:
+		return ExecuteBindings("DELETE FROM item WHERE item_id = ? AND char_id = ? AND storage = ? AND customfield = ?;", [itemID, charID, storageType, customfield])
 	return false
 
 func GetStorage(charID : int, storageType : int = 0) -> Array[Dictionary]:
@@ -568,15 +760,15 @@ func GetAccountEmail(accountID : int) -> String:
 	return ""
 
 func CheckAccountPassword(accountID : int, triedPassword : String) -> bool:
-	var results : Array[Dictionary] = QueryBindings("SELECT password, password_salt FROM account WHERE account_id = ?;", [accountID])
+	var results : Array[Dictionary] = QueryBindings("SELECT password, password_salt, hash_ver FROM account WHERE account_id = ?;", [accountID])
 	if results.is_empty():
 		return false
-	return Hasher.HashPassword(triedPassword, results[0]["password_salt"]) == results[0]["password"]
+	return Hasher.VerifyPassword(triedPassword, results[0]["password_salt"], results[0]["password"], int(results[0].get("hash_ver", 0)))
 
 func UpdateAccountPassword(accountID : int, newPassword : String) -> bool:
 	var salt : String = Hasher.GenerateSalt()
-	var hashedPassword : String = Hasher.HashPassword(newPassword, salt)
-	return ExecuteBindings("UPDATE account SET password = ?, password_salt = ? WHERE account_id = ?;", [hashedPassword, salt, accountID])
+	var hashedPassword : String = Hasher.HashPasswordV1(newPassword, salt)
+	return ExecuteBindings("UPDATE account SET password = ?, password_salt = ?, hash_ver = ?, failed_attempts = 0, locked_until = 0 WHERE account_id = ?;", [hashedPassword, salt, Hasher.HashVersion, accountID])
 
 func RemoveAllAuthTokens(accountID : int) -> bool:
 	return ExecuteBindings("DELETE FROM auth_token WHERE account_id = ?;", [accountID])
@@ -713,6 +905,7 @@ func Wipe():
 	db.delete_rows("equipment", "")
 	db.delete_rows("ip_ban", "")
 	db.delete_rows("item", "")
+	db.delete_rows("item_instance", "")
 	db.delete_rows("quest", "")
 	db.delete_rows("skill", "")
 	db.delete_rows("sqlite_sequence", "")

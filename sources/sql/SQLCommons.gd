@@ -38,6 +38,11 @@ static func Timestamp() -> int:
 static func GetBackupPath() -> String:
 	return Path.Local + (BackupPathTesting if LauncherCommons.IsTesting else BackupPath)
 
+# SOM-IDLE A2: diretório offsite (montagem NFS/S3-fuse/segundo disco) via env.
+# Vazio = desabilitado. O push é best-effort e nunca falha o backup local.
+static func GetOffsiteBackupPath() -> String:
+	return OS.get_environment("SHAMBLETA_OFFSITE_BACKUPS").strip_edges()
+
 static func GetDBPath() -> String:
 	return Path.Local + (DBNameTesting if LauncherCommons.IsTesting else DBName)
 

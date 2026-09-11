@@ -126,6 +126,17 @@ const ResetCodeExpiryMinutes : int		= 15
 const ResetCodeCooldownMinutes : int	= 5
 const ResetCodeSize : int				= 6
 
+# Auth hardening (SOM-IDLE A1: anti-bruteforce backoff)
+const MaxLoginAttempts : int			= 5
+const BaseLockoutSec : int				= 300
+const MaxLockoutSec : int				= 7200
+
+# SOM-IDLE A2: produção pública exige TLS (WSS/DTLS). Dev/test/offline/local
+# estão isentos (loopback ou sem rede). WebRTC não passa por aqui e já é
+# sempre cifrado pelo próprio protocolo (DTLS-SRTP mandatório).
+static func RequiresTLS(isTesting : bool, isOffline : bool, isLocal : bool) -> bool:
+	return not isTesting and not isOffline and not isLocal
+
 # Tools
 const OnlineListPath : String			= ""
 
