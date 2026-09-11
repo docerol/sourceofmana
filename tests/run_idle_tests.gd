@@ -114,6 +114,7 @@ func _run_tests():
 		await suites.SuiteIdlePolicySim(suites.lastCharID)
 		# SOM-IDLE: D1 pacing (harness fast; real-time probe ~5min, binding gate)
 		suites.SuiteFaucetHarness(sql)
+		await suites.SuiteOnboarding(sql)
 		await suites.SuiteIdlePolicyRealTime(sql)
 	else:
 		print("FATAL: DB not initialized — DB-backed suites skipped")

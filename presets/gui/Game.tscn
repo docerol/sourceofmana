@@ -56,6 +56,9 @@
 [ext_resource type="Texture2D" uid="uid://b8y1uu7yv8w2p" path="res://data/graphics/gui/mobile/buttonR_pressed.png" id="31_udatq"]
 [ext_resource type="PackedScene" uid="uid://dhdq88so6g3yh" path="res://presets/gui/Stats.tscn" id="35_d1kq3"]
 [ext_resource type="PackedScene" uid="uid://u31xl3ap3wd8" path="res://presets/gui/Inventory.tscn" id="35_j05ha"]
+[ext_resource type="PackedScene" path="res://presets/gui/ZoneMap.tscn" id="50_zone"]
+[ext_resource type="PackedScene" path="res://presets/gui/AfkReport.tscn" id="51_afk"]
+[ext_resource type="PackedScene" path="res://presets/gui/Formation.tscn" id="52_form"]
 [ext_resource type="PackedScene" uid="uid://bmsbt0owg4j86" path="res://presets/gui/Emote.tscn" id="37_v7lrk"]
 [ext_resource type="PackedScene" uid="uid://b5jgfu2dukotm" path="res://presets/gui/Skill.tscn" id="38_ompay"]
 [ext_resource type="PackedScene" uid="uid://b8frfkv2y8x6" path="res://presets/gui/RespawnWindow.tscn" id="44_7o5pa"]
@@ -233,6 +236,24 @@ layout_mode = 2
 texture = ExtResource("11_17vy0")
 targetWindow = NodePath("../../../../../../../Windows/Floating/Settings")
 targetShortcut = &"ui_settings"
+
+[node name="ZoneMap" parent="Overlay/VSections/Indicators/Menu/MenuContent/HBoxItems" node_paths=PackedStringArray("targetWindow") instance=ExtResource("3_sl5jl")]
+visible = false
+layout_mode = 2
+texture = ExtResource("7_cv35r")
+targetWindow = NodePath("../../../../../../../Windows/Floating/ZoneMap")
+
+[node name="Formation" parent="Overlay/VSections/Indicators/Menu/MenuContent/HBoxItems" node_paths=PackedStringArray("targetWindow") instance=ExtResource("3_sl5jl")]
+visible = false
+layout_mode = 2
+texture = ExtResource("22_ubwl8")
+targetWindow = NodePath("../../../../../../../Windows/Floating/Formation")
+
+[node name="AFK" parent="Overlay/VSections/Indicators/Menu/MenuContent/HBoxItems" node_paths=PackedStringArray("targetWindow") instance=ExtResource("3_sl5jl")]
+visible = false
+layout_mode = 2
+texture = ExtResource("9_vtuwx")
+targetWindow = NodePath("../../../../../../../Windows/Floating/AFK")
 
 [node name="Contexts" type="Control" parent="Overlay/VSections" unique_id=238552505]
 z_as_relative = false
@@ -453,6 +474,45 @@ offset_left = 645.0
 offset_top = 153.0
 offset_right = 1021.0
 offset_bottom = 467.0
+grow_horizontal = 1
+grow_vertical = 1
+saveOverlayState = true
+allowAutomaticResize = true
+
+[node name="ZoneMap" parent="Windows/Floating" instance=ExtResource("50_zone")]
+visible = false
+show_behind_parent = false
+layout_mode = 0
+offset_left = 600.0
+offset_top = 120.0
+offset_right = 1020.0
+offset_bottom = 520.0
+grow_horizontal = 1
+grow_vertical = 1
+saveOverlayState = true
+allowAutomaticResize = true
+
+[node name="Formation" parent="Windows/Floating" instance=ExtResource("52_form")]
+visible = false
+show_behind_parent = false
+layout_mode = 0
+offset_left = 660.0
+offset_top = 160.0
+offset_right = 980.0
+offset_bottom = 420.0
+grow_horizontal = 1
+grow_vertical = 1
+saveOverlayState = true
+allowAutomaticResize = true
+
+[node name="AFK" parent="Windows/Floating" instance=ExtResource("51_afk")]
+visible = false
+show_behind_parent = false
+layout_mode = 0
+offset_left = 700.0
+offset_top = 180.0
+offset_right = 1000.0
+offset_bottom = 420.0
 grow_horizontal = 1
 grow_vertical = 1
 saveOverlayState = true

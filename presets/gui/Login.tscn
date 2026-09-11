@@ -191,12 +191,6 @@ layout_mode = 2
 size_flags_horizontal = 3
 text = "Remember me"
 
-[node name="OnlineIndicator" type="CheckBox" parent="HBoxContainer/Panel/Margin/VBoxContainer/LoginContainer/IndicatorRow" unique_id=608763401]
-layout_mode = 2
-size_flags_horizontal = 10
-theme_type_variation = &"PearlBox"
-disabled = true
-
 [node name="HSeparator2" type="HSeparator" parent="HBoxContainer/Panel/Margin/VBoxContainer" unique_id=1967145083]
 layout_mode = 2
 size_flags_vertical = 0

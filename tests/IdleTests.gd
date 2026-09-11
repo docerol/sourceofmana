@@ -357,71 +357,9 @@ func SuiteIdlePolicySim(charID : int) -> void:
 func _SimRun(charID : int, runIdx : int, simSeconds : int, timeScale : float, zoneID : int = 1, dumpMatchup : bool = false) -> Dictionary:
 	var snapshot : Dictionary = {"run": runIdx, "kills": 0, "kills_per_hour": 0.0, "deaths": 0, "efficiency": 0.0, "gold_gained": 0, "levels_gained": 0}
 
-	var zone1 : FarmZoneData = FarmZoneData.GetZone(zoneID)
-	if zone1 == null or zone1.mapID == DB.UnknownHash:
-		Check(false, "sim run %d: zone %d has a map" % [runIdx, zoneID])
+	var agent : PlayerAgent = await _SpawnSimAgent(charID, runIdx, zoneID)
+	if agent == null:
 		return snapshot
-	var map : WorldMap = Launcher.World.GetMap(zone1.mapID)
-	if map == null:
-		Check(false, "sim run %d: zone %d map instantiated" % [runIdx, zoneID])
-		return snapshot
-
-	# Per-run fresh instance, re-seeded BEFORE CreateInstance so the mob spawn
-	# RNG produces an identical layout every run (determinism for the spread
-	# gate); DestroyInstance also clears any stale respawn timers.
-	seed(20260101)	# §7.4: seed fixa — identical across runs
-	var instID : int = IdlePolicyService.GetFarmInstanceID(zoneID)
-	var stale : WorldInstance = map.instances.get(instID, null)
-	if stale:
-		stale.Destroy()
-		map.instances.erase(instID)
-	map.CreateInstance(instID)
-
-	# Wait for the dedicated instance to warm up (deferred add + nav sync)
-	var warm : bool = false
-	for i in 200:
-		var candidate : WorldInstance = IdlePolicyService.GetFarmInstance(zoneID)
-		if candidate != null and candidate.is_node_ready() and NavigationServer2D.map_get_iteration_id(map.mapRID) > 0:
-			warm = true
-			break
-		await Launcher.get_tree().process_frame
-	if not Check(warm, "sim run %d: farm instance warm" % runIdx):
-		return snapshot
-
-	# Refill the instance if a previous run's respawn chain stalled
-	var warmInst : WorldInstance = IdlePolicyService.GetFarmInstance(zoneID)
-	if warmInst.mobs.size() < 5:
-		for spawn in map.spawns:
-			if spawn:
-				var refill : SpawnObject = spawn.duplicate()
-				refill.map = map
-				refill.is_persistant = true
-				for i in refill.count:
-					WorldAgent.CreateAgent(refill, instID, refill.nick)
-
-	# Spawn a real PlayerAgent directly into the farm instance
-	var charInfo : Dictionary = Launcher.SQL.GetCharacterInfo(charID)
-	# Spawn directly into the farm instance at a FIXED anchor (first monster
-	# spawn group): NavigationServer's RNG ignores seed(), so a random spawn
-	# point would make each run start from a different spot and break the
-	# determinism the ±15% spread check relies on.
-	var anchor : SpawnObject = null
-	for spawn in map.spawns:
-		if spawn and spawn.type == ActorCommons.Type.MONSTER:
-			anchor = spawn
-			break
-	var spawnPoint : SpawnObject = SpawnObject.new()
-	spawnPoint.map = map
-	spawnPoint.type = ActorCommons.Type.PLAYER
-	spawnPoint.id = DB.PlayerHash
-	spawnPoint.is_global = false
-	spawnPoint.spawn_position = anchor.spawn_position if anchor else Vector2i.ZERO
-	spawnPoint.spawn_offset = Vector2i(32, 32)
-
-	var agent : PlayerAgent = WorldAgent.CreateAgent(spawnPoint, instID, "IdleTester")
-	if not Check(agent != null, "sim run %d: test agent spawned" % runIdx):
-		return snapshot
-	agent.SetCharacterInfo(charInfo, charID)
 
 	# Start the session (instance warm → attaches the policy synchronously; the
 	# warp is skipped because the agent is already entering the farm instance)
@@ -506,6 +444,108 @@ func _SimRun(charID : int, runIdx : int, simSeconds : int, timeScale : float, zo
 	IdlePolicyService.StopIdleSession(agent)
 	WorldAgent.RemoveAgent(agent)
 	return snapshot
+
+# SOM-IDLE onboarding: spawns a live PlayerAgent into a warm farm instance
+# (extracted from _SimRun; same steps, no session start — caller decides).
+func _SpawnSimAgent(charID : int, runIdx : int, zoneID : int) -> PlayerAgent:
+	var zone1 : FarmZoneData = FarmZoneData.GetZone(zoneID)
+	if zone1 == null or zone1.mapID == DB.UnknownHash:
+		Check(false, "sim run %d: zone %d has a map" % [runIdx, zoneID])
+		return null
+	var map : WorldMap = Launcher.World.GetMap(zone1.mapID)
+	if map == null:
+		Check(false, "sim run %d: zone %d map instantiated" % [runIdx, zoneID])
+		return null
+
+	# Per-run fresh instance, re-seeded BEFORE CreateInstance so the mob spawn
+	# RNG produces an identical layout every run (determinism for the spread
+	# gate); DestroyInstance also clears any stale respawn timers.
+	seed(20260101)	# §7.4: seed fixa — identical across runs
+	var instID : int = IdlePolicyService.GetFarmInstanceID(zoneID)
+	var stale : WorldInstance = map.instances.get(instID, null)
+	if stale:
+		stale.Destroy()
+		map.instances.erase(instID)
+	map.CreateInstance(instID)
+
+	# Wait for the dedicated instance to warm up (deferred add + nav sync)
+	var warm : bool = false
+	for i in 200:
+		var candidate : WorldInstance = IdlePolicyService.GetFarmInstance(zoneID)
+		if candidate != null and candidate.is_node_ready() and NavigationServer2D.map_get_iteration_id(map.mapRID) > 0:
+			warm = true
+			break
+		await Launcher.get_tree().process_frame
+	if not Check(warm, "sim run %d: farm instance warm" % runIdx):
+		return null
+
+	# Refill the instance if a previous run's respawn chain stalled
+	var warmInst : WorldInstance = IdlePolicyService.GetFarmInstance(zoneID)
+	if warmInst.mobs.size() < 5:
+		for spawn in map.spawns:
+			if spawn:
+				var refill : SpawnObject = spawn.duplicate()
+				refill.map = map
+				refill.is_persistant = true
+				for i in refill.count:
+					WorldAgent.CreateAgent(refill, instID, refill.nick)
+
+	# Spawn a real PlayerAgent directly into the farm instance
+	var charInfo : Dictionary = Launcher.SQL.GetCharacterInfo(charID)
+	# Spawn directly into the farm instance at a FIXED anchor (first monster
+	# spawn group): NavigationServer's RNG ignores seed(), so a random spawn
+	# point would make each run start from a different spot and break the
+	# determinism the ±15% spread check relies on.
+	var anchor : SpawnObject = null
+	for spawn in map.spawns:
+		if spawn and spawn.type == ActorCommons.Type.MONSTER:
+			anchor = spawn
+			break
+	var spawnPoint : SpawnObject = SpawnObject.new()
+	spawnPoint.map = map
+	spawnPoint.type = ActorCommons.Type.PLAYER
+	spawnPoint.id = DB.PlayerHash
+	spawnPoint.is_global = false
+	spawnPoint.spawn_position = anchor.spawn_position if anchor else Vector2i.ZERO
+	spawnPoint.spawn_offset = Vector2i(32, 32)
+
+	var agent : PlayerAgent = WorldAgent.CreateAgent(spawnPoint, instID, "IdleTester")
+	if not Check(agent != null, "sim run %d: test agent spawned" % runIdx):
+		return null
+	agent.SetCharacterInfo(charInfo, charID)
+	return agent
+
+# SOM-IDLE onboarding: fresh char auto-farms zone 1 on the login path.
+func SuiteOnboarding(sql : SQLService) -> void:
+	print("[suite] Onboarding (auto-farm)")
+	var charID : int = CreateFixture(sql, "idle_ob_account", "IdleOBTester")
+	if not Check(charID != 0, "onboarding fixture created"):
+		return
+	CheckEq(int(sql.GetCharacter(charID).get("farm_zone", -1)), 0, "fresh char unzoned")
+	var agent : PlayerAgent = await _SpawnSimAgent(charID, 960, 1)
+	if not Check(agent != null, "onboarding agent spawned"):
+		return
+	Check(IdlePolicyService.AutoFarmIfUnzoned(charID, agent), "auto-farm started")
+	CheckEq(int(sql.GetCharacter(charID).get("farm_zone", -1)), 1, "zone 1 latched")
+	Check(agent.idlePolicy != null, "policy attached")
+	# Zoned chars are never reset back to 1.
+	sql.SetCharacterFarmZone(charID, 5)
+	Check(IdlePolicyService.AutoFarmIfUnzoned(charID, agent), "zoned char keeps farming")
+	CheckEq(int(sql.GetCharacter(charID).get("farm_zone", -1)), 5, "zone not clobbered")
+	sql.SetCharacterFarmZone(charID, 1)
+	# Fresh char gets kills fast (onboarding sane).
+	var startTicks : int = Engine.get_physics_frames()
+	var startMsec : int = Time.get_ticks_msec()
+	while Engine.get_physics_frames() - startTicks < 20 * Engine.get_physics_ticks_per_second():
+		await Launcher.get_tree().physics_frame
+		if not is_instance_valid(agent) or Time.get_ticks_msec() - startMsec > 60000:
+			break
+	if Check(is_instance_valid(agent) and agent.idlePolicy != null, "onboarding agent alive"):
+		Check(agent.idlePolicy.sessionKills > 0, "fresh char kills within 20s (%d)" % agent.idlePolicy.sessionKills)
+	IdlePolicyService.StopIdleSession(agent)
+	WorldAgent.RemoveAgent(agent)
+	sql.db.delete_rows("character", "nickname = 'IdleOBTester'")
+	sql.db.delete_rows("account", "username = 'idle_ob_account'")
 
 # SOM-IDLE D1: real-time diagnostic entry (zone-parametric).
 func _SimRunDiag(charID : int, zoneID : int, simSeconds : int) -> Dictionary:

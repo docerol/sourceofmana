@@ -26,6 +26,22 @@ static func GetFarmInstance(zoneID : int) -> WorldInstance:
 static func IsServerSide() -> bool:
 	return Launcher.World != null
 
+# SOM-IDLE onboarding: char sem zona (fresh) entra farmando a zona 1
+# automaticamente no login — criar o char já é começar a jogar.
+# Retorna true se iniciou (ou já estava zonado, nada a fazer).
+static func AutoFarmIfUnzoned(charID : int, player : PlayerAgent) -> bool:
+	if not IsServerSide() or player == null or not is_instance_valid(player):
+		return false
+	var sql : SQLService = Launcher.SQL
+	var char : Dictionary = sql.GetCharacter(charID)
+	if char.is_empty():
+		return false
+	if int(char.get("farm_zone", 0)) > 0:
+		return true
+	sql.SetCharacterFarmZone(charID, 1)
+	Util.PrintLog("Idle", "Onboarding: character %d auto-farming zone 1" % charID)
+	return StartIdleSession(player, 1)
+
 # ------------------------------------------------------------------ session lifecycle
 
 # Creates (or reuses) the dedicated farm instance, warps the player into it and

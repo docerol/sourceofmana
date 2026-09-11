@@ -39,6 +39,9 @@ extends ServiceBase
 @onready var respawnWindow : WindowPanel		= $Windows/Floating/Respawn
 @onready var statWindow : WindowPanel			= $Windows/Floating/Stat
 @onready var socialWindow : WindowPanel			= $Windows/Floating/Social
+@onready var zoneWindow : WindowPanel			= $Windows/Floating/ZoneMap
+@onready var formationWindow : WindowPanel		= $Windows/Floating/Formation
+@onready var afkWindow : WindowPanel				= $Windows/Floating/AFK
 
 @onready var chatContainer : ChatContainer		= $Windows/Floating/Chat/Margin/VBoxContainer
 @onready var emoteContainer : Container			= $Windows/Floating/Emote/Layout/ItemContainer/Grid
@@ -112,21 +115,14 @@ func DisplayFirstLogin():
 	if LauncherCommons.isWeb:
 		UICommons.MessageBox("""Welcome to Shambleta!
 
-You're currently playing the web version, which may run slower and isn't as stable as the downloadable versions.
-
-This version is mainly here to showcase the game.
-For the best experience, we recommend using the native client found on our itch.io page (Available on Windows, Linux, macOS, and Android).
+Shambleta is an idle auto battler: build your fighter, pick a farm zone and your team fights on its own — online or offline. Loot, gear up, open chests and climb the leaderboards.
 """,
 			settingsWindow.set_sessionfirstlogin.bind(false), "OK",
 			OpenDiscord, "Join our Discord")
 	else:
 		UICommons.MessageBox("""Welcome to Shambleta!
 
-This is an open-source MMORPG and still a work in progress. You're welcome to explore, test, and enjoy the current features.
-
-We're also always looking for contributors!
-If you'd like to get involved in development, design, writing, or testing, feel free to join our community.
-Otherwise, have fun and thank you for playing!
+Shambleta is an idle auto battler: build your fighter, pick a farm zone and your team fights on its own — online or offline. Loot, gear up, open chests and climb the leaderboards.
 """,
 			settingsWindow.set_sessionfirstlogin.bind(false), "OK",
 			OpenDiscord, "Join our Discord")

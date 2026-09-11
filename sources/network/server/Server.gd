@@ -204,6 +204,8 @@ func ConnectCharacter(nickname : String, peerID : int):
 					Launcher.SQL.CharacterLogin(peer.characterID)
 					# SOM-IDLE: F3 — seed the cached power score on every connect
 					Launcher.SQL.UpdatePowerScore(peer.characterID, Formula.GetPowerScore(agent.stat))
+					# SOM-IDLE onboarding: fresh char (sem zona) já entra farmando.
+					IdlePolicyService.AutoFarmIfUnzoned(peer.characterID, agent)
 
 					var ip : String = Peers.GetPeerIP(peerID)
 					Util.PrintLog("Server", "Player connected: %s (%d) via %s from %s" % [nickname, peerID, Peers.GetTransportName(Peers.GetTransport(peerID)), ip if not ip.is_empty() else "unavailable"])

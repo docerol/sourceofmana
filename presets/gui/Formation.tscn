@@ -1,0 +1,82 @@
+[gd_scene format=3]
+
+[ext_resource type="Theme" path="res://data/themes/DefaultTheme.tres" id="1"]
+[ext_resource type="Script" path="res://sources/gui/Formation.gd" id="2"]
+[ext_resource type="PackedScene" path="res://presets/gui/TitleBar.tscn" id="3"]
+
+[node name="Formation" type="PanelContainer"]
+custom_minimum_size = Vector2(320, 260)
+offset_right = 320.0
+offset_bottom = 260.0
+theme = ExtResource("1")
+theme_type_variation = &"WindowPanel"
+script = ExtResource("2")
+
+[node name="Layout" type="VBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="TitleBar" parent="Layout" instance=ExtResource("3")]
+layout_mode = 2
+size_flags_vertical = 0
+titleText = "Formation"
+
+[node name="SlotRow" type="HBoxContainer" parent="Layout"]
+layout_mode = 2
+
+[node name="SlotLabel" type="Label" parent="Layout/SlotRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Slot"
+
+[node name="Slot" type="OptionButton" parent="Layout/SlotRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="CharRow" type="HBoxContainer" parent="Layout"]
+layout_mode = 2
+
+[node name="CharLabel" type="Label" parent="Layout/CharRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Character"
+
+[node name="CharName" type="Label" parent="Layout/CharRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "?"
+
+[node name="SkillRow" type="HBoxContainer" parent="Layout"]
+layout_mode = 2
+
+[node name="SkillLabel" type="Label" parent="Layout/SkillRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Skill"
+
+[node name="Skill" type="OptionButton" parent="Layout/SkillRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="PotionRow" type="HBoxContainer" parent="Layout"]
+layout_mode = 2
+
+[node name="PotionLabel" type="Label" parent="Layout/PotionRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Potion %"
+
+[node name="Potion" type="HSlider" parent="Layout/PotionRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+max_value = 100.0
+value = 35.0
+
+[node name="PotionPct" type="Label" parent="Layout/PotionRow"]
+layout_mode = 2
+text = "35%"
+
+[node name="Save" type="Button" parent="Layout"]
+layout_mode = 2
+text = "Save Loadout"
+
+[connection signal="pressed" from="Layout/Save" to="." method="_on_save_pressed"]

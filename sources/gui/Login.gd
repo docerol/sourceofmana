@@ -14,7 +14,6 @@ extends Control
 @onready var resetCodeTextControl : LineEdit	= $HBoxContainer/Panel/Margin/VBoxContainer/LoginContainer/Code/Container/Text
 @onready var indicatorRow : HBoxContainer	= $HBoxContainer/Panel/Margin/VBoxContainer/LoginContainer/IndicatorRow
 @onready var rememberMeCheckBox : CheckBox	= $HBoxContainer/Panel/Margin/VBoxContainer/LoginContainer/IndicatorRow/RememberMe
-@onready var onlineIndicator : CheckBox		= $HBoxContainer/Panel/Margin/VBoxContainer/LoginContainer/IndicatorRow/OnlineIndicator
 @onready var panel : PanelContainer			= $HBoxContainer/Panel
 @onready var separator : HSeparator			= $HBoxContainer/Panel/Margin/VBoxContainer/HSeparator2
 @onready var news : Scrollable				= $HBoxContainer/Panel/Margin/VBoxContainer/News
@@ -95,7 +94,7 @@ func FillWarningLabel(err : NetworkCommons.AuthError):
 			isWarn = false
 			SetRecoveryState(RecoveryState.NONE)
 		_:
-			warn = "Could not connect to the server (Error %d).\nPlease contact us via our [url=%s][color=#%s]Discord server[/color][/url].\nMeanwhile be sure to test the offline mode!" % [err, LauncherCommons.SocialLink, UICommons.DarkTextColor]
+			warn = "Could not connect to the server (Error %d).\nPlease contact us via our [url=%s][color=#%s]Discord server[/color][/url].\nCheck your connection and try again!" % [err, LauncherCommons.SocialLink, UICommons.DarkTextColor]
 
 	var textColor : Color = UICommons.WarnTextColor if isWarn else UICommons.TextColor
 
@@ -204,16 +203,6 @@ func RefreshFocusNodes(accountCreatorEnabled : bool):
 		nameTextControl.set_focus_previous(passwordTextControl.get_path())
 		passwordTextControl.set_focus_next(nameTextControl.get_path())
 
-func RefreshOnlineMode():
-	OnlineMode(Network.Client != null, Network.ENetServer != null or Network.WebSocketServer != null)
-
-func OnlineMode(_clientStarted : bool, serverStarted : bool):
-	if onlineIndicator:
-		Launcher.GUI.buttonBoxes.Rename(UICommons.ButtonBox.TERTIARY, "Switch Online" if serverStarted else "Switch Offline")
-		onlineIndicator.text = "Playing Offline" if serverStarted else "Playing Online"
-		if onlineIndicator.button_pressed != not serverStarted:
-			onlineIndicator.button_pressed = not serverStarted
-
 func EnableButtons(state : bool):
 	if Launcher.GUI and Launcher.GUI.buttonBoxes:
 		Launcher.GUI.buttonBoxes.ClearAll()
@@ -228,13 +217,10 @@ func EnableButtons(state : bool):
 				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.PRIMARY, "Create", CreateAccount)
 				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.CANCEL, "Cancel", EnableAccountCreator.bind(false))
 			else:
+				# SOM-IDLE: 100% online (browser) — sem toggle offline.
 				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.PRIMARY, "Connect", Connect)
-				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.TERTIARY, "Switch Online", SwitchOnlineMode.bind(onlineIndicator.button_pressed))
 				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.SECONDARY, "Create Account", EnableAccountCreator.bind(true))
 				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.CANCEL, "Forgot Password", SetRecoveryState.bind(RecoveryState.REQUEST_EMAIL))
-				RefreshOnlineMode()
-		else:
-			onlineIndicator.text = "Connecting..."
 
 func RefreshOnce():
 	EnableAccountCreator(isAccountCreatorEnabled)
@@ -372,11 +358,6 @@ func _on_visibility_changed():
 			passwordTextControl.grab_focus()
 		EnableButtons(true)
 
-func SwitchOnlineMode(toggled : bool):
-	EnableButtons(true)
-	if Launcher.Mode(true, toggled):
-		EnableButtons(false)
-
 func _on_password_text_changed(_newText : String):
 	if not fillingFields:
 		savedToken = ""
@@ -386,6 +367,5 @@ func _on_remember_me_toggled(toggled_on : bool):
 		ClearSavedToken()
 
 func _ready():
-	Launcher.launchModeUpdated.connect(OnlineMode)
 	if LoadSavedToken():
 		rememberMeCheckBox.button_pressed = true

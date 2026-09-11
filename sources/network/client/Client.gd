@@ -1,6 +1,9 @@
 extends NetInterface
 class_name NetClient
 
+# SOM-IDLE onboarding: último AFK report (lido pela janela AfkReport).
+static var LastAFKReport : Dictionary = {}
+
 #
 func WarpPlayer(mapID : int, playerPos : Vector2, _peerID : int):
 	if Launcher.Map:
@@ -310,11 +313,17 @@ func PushNotification(notif : String, _peerID : int):
 
 # SOM-IDLE: F2 idle-spike client handlers (TECH_SPEC_CORE §5)
 func AFKReport(report : Dictionary, _peerID : int):
+	LastAFKReport = report
 	if not Launcher.GUI:
 		return
 	if report.is_empty():
 		Launcher.GUI.notificationLabel.AddNotification("AFK: nothing to claim")
 		return
+	# SOM-IDLE onboarding: espelha na janela + abre para coletar.
+	if Launcher.GUI.afkWindow:
+		Launcher.GUI.afkWindow.ShowReport(report)
+		if not Launcher.GUI.afkWindow.is_visible():
+			Launcher.GUI.ToggleControl(Launcher.GUI.afkWindow)
 
 	var xp : int = int(report.get("xp_earned", 0))
 	var gold : int = int(report.get("gold_earned", 0))
