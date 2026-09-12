@@ -35,15 +35,6 @@ var recoveryState : RecoveryState			= RecoveryState.NONE
 var pendingFocusControl : Control			= null
 
 #
-func _ready():
-	consentCheckBox = CheckBox.new()
-	consentCheckBox.text = "I have read and accept the Terms of Use and Privacy Policy"
-	consentCheckBox.visible = false
-	loginContainer.add_child(consentCheckBox)
-	# logo abaixo do campo de e-mail, acima da linha de "Remember me"
-	loginContainer.move_child(consentCheckBox, emailControl.get_index() + 1)
-
-#
 func FillWarningLabel(err : NetworkCommons.AuthError):
 	if isAccountCreatorEnabled:
 		FSM.EnterState(FSM.States.LOGIN_SCREEN)
@@ -393,5 +384,12 @@ func _on_remember_me_toggled(toggled_on : bool):
 		ClearSavedToken()
 
 func _ready():
+	# SOM-IDLE LGPD: checkbox de aceite (scroll do termo não é consentimento).
+	consentCheckBox = CheckBox.new()
+	consentCheckBox.text = "I have read and accept the Terms of Use and Privacy Policy"
+	consentCheckBox.visible = false
+	loginContainer.add_child(consentCheckBox)
+	# logo abaixo do campo de e-mail, acima da linha de "Remember me"
+	loginContainer.move_child(consentCheckBox, emailControl.get_index() + 1)
 	if LoadSavedToken():
 		rememberMeCheckBox.button_pressed = true
