@@ -14,7 +14,7 @@ class_name IdleTests
 #   9. IdlePolicy sim    — deterministic farm on a live instance (zone 1)
 
 const Zone1GoldenXpPerKill : int = 1200
-const Zone1GoldenParKills : int = 72			# SOM-IDLE D1: par medido @1x (média 72, banda 36–90)
+const Zone1GoldenParKills : int = 150			# SOM-IDLE: par recalibrado pós cast-fix+dano-mínimo (probe mede ~160/h)
 const TolerancePct : float = 0.5
 
 var failures : int = 0
@@ -122,24 +122,24 @@ func SuiteXpCurve() -> void:
 
 func SuiteZoneCatalog() -> void:
 	print("[suite] zone catalog")
-	CheckEq(FarmZoneData.GetZoneCount(), 40, "Catalog has 40 zones")
+	CheckEq(FarmZoneData.GetZoneCount(), 24, "Catalog has 24 farm zones (bosses excluded)")
 	var zone1 : FarmZoneData = FarmZoneData.GetZone(1)
 	Check(zone1 != null, "Zone 1 exists")
 	if zone1:
 		CheckEq(zone1.xpPerKill, Zone1GoldenXpPerKill, "Zone 1 xpPerKill golden")
 		var par : int = roundi(3600.0 / (FarmZoneData.ParBaseSeconds + FarmZoneData.ParPerZoneSeconds * 0.0))
 		CheckEq(zone1.parKillsPerHour, par, "Zone 1 par kills/h")
-		CheckEq(par, Zone1GoldenParKills, "Zone 1 par golden (D1 measured)")
+		CheckEq(par, Zone1GoldenParKills, "Zone 1 par golden (recalibrated)")
 		CheckEq(zone1.goldPerKill, roundi(1200 / 8), "Zone 1 goldPerKill = xp/8")
-	# z40 ≈ 1200 * 1.25^39 ≈ 76M (±0.5%)
-	var zone40 : FarmZoneData = FarmZoneData.GetZone(40)
-	if zone40:
-		CheckNear(float(zone40.xpPerKill), roundi(1200.0 * pow(1.25, 39)), TolerancePct, "Zone 40 xpPerKill golden")
-	# Tier progression: tier = ceil(id/5), minPower = (tier-1)*30
+	# z24 ≈ 1200 * 1.25^23 ≈ 234k (±0.5%) — curva agora termina na última zona real
+	var zoneDeep : FarmZoneData = FarmZoneData.GetZone(24)
+	if zoneDeep:
+		CheckNear(float(zoneDeep.xpPerKill), roundi(1200.0 * pow(1.25, 23)), TolerancePct, "Zone 24 xpPerKill golden")
+	# Tier progression: tier = ceil(id/3); minPower = 24 + 8*(z-1) (escada suave)
 	var z6 : FarmZoneData = FarmZoneData.GetZone(6)
 	if z6:
 		CheckEq(z6.tier, 2, "Zone 6 tier 2")
-		CheckEq(z6.minPower, 30, "Zone 6 minPower 30")
+		CheckEq(z6.minPower, 64, "Zone 6 minPower 64 (ladder)")
 	# Zone 1 map must resolve into MapsDB (requires boot + map import)
 	if DB.isInitialized:
 		FarmZoneData.SyncWithDB()
@@ -153,7 +153,7 @@ func SuiteZoneCatalog() -> void:
 	var startTicks : int = Time.get_ticks_usec()
 	var acc : int = 0
 	for i in 10000:
-		acc += FarmZoneData.GetZone((i % 40) + 1).xpPerKill
+		acc += FarmZoneData.GetZone((i % 24) + 1).xpPerKill
 	Check(acc > 0, "Catalog x10k fetch < 1s (%d us)" % (Time.get_ticks_usec() - startTicks))
 
 func SuiteFormatter() -> void:
@@ -590,13 +590,11 @@ func SuiteIdlePolicyRealTime(sql : SQLService) -> void:
 	# wander/spawn; banda observada 36–90). Precisão de pacing vem do harness
 	# (determinístico) + telemetria do beta. Aqui: piso de onboarding (L2 em
 	# minutos) e teto de sanidade.
-	# SOM-IDLE: piso rebaixado 30→10 (2026-09): o agente real-time sofre stall
-	# de movimento conhecido (~2-3 u/s após os primeiros kills — perseguição
-	# sem timeout a target inalcançável; banda observada caiu para 12–36/h).
-	# É o mesmo gap de pacing do beta (real ~36/h vs par 72/h). O piso ainda
-	# pega colapso total (0 kills) e regressões de pacing grosseiras; quando o
-	# stall for corrigido, restaurar o piso para 30.
-	Check(rate >= 10.0, "realtime: onboarding floor (%.0f/h ≥ 10/h; stall conhecido)" % rate)
+	# SOM-IDLE: piso reapertado 10→60. O stall de cancelamento de cast e o wall
+	# de defesa dos mobs foram corrigidos (probe agora ~160/h de forma estável).
+	# Piso a 60 pega uma regressão ao regime doente (11–36/h) mantendo folga de
+	# CI. Teto em 200/h. Par de design da zona 1 = 150/h.
+	Check(rate >= 60.0, "realtime: onboarding floor (%.0f/h ≥ 60/h)" % rate)
 	Check(rate <= 200.0, "realtime: sanity ceiling (%.0f/h ≤ 200/h)" % rate)
 	sql.db.delete_rows("character", "nickname = 'IdleRTTester'")
 	sql.db.delete_rows("account", "username = 'idle_rt_account'")
@@ -692,9 +690,9 @@ func SuiteItemTiers() -> void:
 func SuiteFarmSpawnTable() -> void:
 	print("[suite] farm spawn table (F3)")
 	Check(FarmZoneData.GetFarmSpawnMultiplier(1) >= 3, "zone 1 spawn multiplier ≥ 3 (%d)" % FarmZoneData.GetFarmSpawnMultiplier(1))
-	Check(FarmZoneData.GetFarmSpawnMultiplier(40) > FarmZoneData.GetFarmSpawnMultiplier(1), "deep zone multiplier > zone 1")
+	Check(FarmZoneData.GetFarmSpawnMultiplier(24) > FarmZoneData.GetFarmSpawnMultiplier(1), "deep zone multiplier > zone 1")
 	var respawns : Array[float] = []
-	for zoneID in [1, 10, 20, 30, 40]:
+	for zoneID in [1, 7, 13, 19, 24]:
 		respawns.append(FarmZoneData.GetFarmRespawnDelay(zoneID))
 	Check(respawns[0] >= respawns[1] and respawns[1] >= respawns[2] and respawns[2] >= respawns[3] and respawns[3] >= respawns[4], "respawn non-increasing with tier")
 	Check(respawns[4] >= FarmZoneData.FarmRespawnMinSeconds, "respawn floor respected (%.1fs)" % respawns[4])

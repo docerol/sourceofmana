@@ -1,6 +1,6 @@
 extends WindowPanel
 
-# SOM-IDLE onboarding: Zone Map — lista as 40 zonas com gate de poder e
+# SOM-IDLE onboarding: Zone Map — lista as zonas de farm com gate de poder e
 # recompensa/hora; clicar chama SetFarmZone (servidor valida e inicia a sessão).
 @onready var zoneList : VBoxContainer = $Layout/ZoneScroll/ZoneList
 

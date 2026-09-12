@@ -37,6 +37,16 @@ static func GetDamage(agent : BaseAgent, target : BaseAgent, skill : SkillCell, 
 	else:
 		skillValue = skill.modifiers.Get(CellCommons.Modifier.Attack)
 		info.value = max(1, agent.stat.current.attack + skillValue - target.stat.current.defense)
+	# SOM-IDLE: farm damage floor. Mobos de aventura têm defesa errática (Croc
+	# def 41, Turtle 38) que, contra o auto-combat de skill única do idle, vira
+	# 1 dano/golpe e derruba a taxa de kill para ~11/h. Para quem está FARMANDO
+	# (player com idlePolicy ativo) garantimos um piso de dano relativo ao HP do
+	# alvo, então nenhuma zona ficaeffective-unkillable. O caminho de aventura
+	# (sem idlePolicy) é 100% intacto. Dodge continua zerando (o piso é aplicado
+	# antes do crit/dodge, mas o branch DODGE o zera depois).
+	var floorDmg : int = FarmDamageFloor(agent, target)
+	if floorDmg > info.value:
+		info.value = floorDmg
 
 	var critMaster : bool = agent.stat.current.critRate > target.stat.current.dodgeRate
 	if critMaster and rng > 1.0 - agent.stat.current.critRate:
@@ -53,6 +63,14 @@ static func GetDamage(agent : BaseAgent, target : BaseAgent, skill : SkillCell, 
 		info.type = ActorCommons.Alteration.DODGE
 
 	return info
+
+# SOM-IDLE: piso de dano do idle — FarmMinDamagePct do HP máximo do alvo, só
+# para jogadores em sessão de farm. Retorna 0 fora desse contexto.
+const FarmMinDamagePct : float = 0.035
+static func FarmDamageFloor(agent : BaseAgent, target : BaseAgent) -> int:
+	if agent is PlayerAgent and (agent as PlayerAgent).idlePolicy != null:
+		return ceili(target.stat.current.maxHealth * FarmMinDamagePct)
+	return 0
 
 static func GetHeal(agent : BaseAgent, target : BaseAgent, skill : SkillCell, rng : float) -> int:
 	var skillValue : int = skill.modifiers.Get(CellCommons.Modifier.Health)

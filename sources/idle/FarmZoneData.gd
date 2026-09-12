@@ -1,28 +1,36 @@
 extends RefCounted
 class_name FarmZoneData
 
-# SOM-IDLE: F2 idle-spike zone model (TECH_SPEC_CORE.md §2 + XP_PROGRESSION.md §4.1.2)
-# Zone 1 must map to a real starting map with low-level mobs; zones 2..N follow the
-# scan ordering by minimum mob level, cycling over each map's own level sets.
-# Spike footprint: 40 declared zones (xp/gold curves + par pacing); 28 map-backed.
+# SOM-IDLE: F2 idle-spike zone model, RECALIBRADO (2026-09) contra o dump real de
+# mapas/mobs (tests/dump_calibration.gd). Só 28 mapas têm mobs e o nível deles
+# cap-a em L20; 4 salas de boss (Dorian/Gabriel/Marvin/Splatyna) saíram do
+# rodízio de farm e viram conteúdo de boss-key. Restam 24 zonas de farm reais,
+# reordenadas por dificuldade monotônica. O antigo catálogo de 40 zonas tinha 12
+# placeholders sem mapa e ordem não-monotônica.
 
-const ZONE_COUNT : int = 40
+const ZONE_COUNT : int = 24
+const ZonesPerTier : int = 3				# 8 tiers × 3 zonas = 24
 const MAX_TIER : int = 8
 
 # XP_PROGRESSION.md §4.1.2
 const XpBasePerKill : int = 1200
 const XpGrowthPerZone : float = 1.25
 const GoldPerKillDiv : int = 8
-# SOM-IDLE D1: par medido em tempo real (diag 120s @1x + probe 300s @1x, char L1
-# fresh com farm vigor: média ~72 kills/h na zona 1, banda observada 36–90).
-# O par 600/h anterior era fantasia de design (6s/kill); a taxa real é dominada
-# por stamina/regen e hit-landing do melee. xpPerKill NÃO muda — o pacing de XP
-# do onboarding está preservado.
-const ParBaseSeconds : float = 50.0
-const ParPerZoneSeconds : float = 0.25
+# SOM-IDLE: par RECALIBRADO pós-fix do cancelamento de cast + dano-mínimo do
+# idle (commit 0f56808 e SkillCommons.FarmDamageFloor). O probe em tempo real
+# mede agora ~160–184 kills/h na zona 1 (era ~72 com os casts cancelados). O
+# par alimenta o ganho OFFLINE (OfflineSettle: xpPerKill × par × h × eff), então
+# precisa casar a taxa online real; ~24s/kill na zona 1, subindo suavemente com
+# a densidade/nível das zonas fundas.
+const ParBaseSeconds : float = 24.0
+const ParPerZoneSeconds : float = 0.9
 
-# Tier pacing (power score gates; F2 stores them, F3/F4 enforce soft gating)
-const TierPowerStep : int = 30
+# Tier pacing. minPower era (tier-1)*30 — baixo demais (um char nu L2 já tem
+# power ~35 e entrava em tier 2). Agora é uma escada suave por ZONA, amarrada
+# ao power nu do nível-intenção da zona (fit medido: nakedPower ≈ 14 + 10.7*L).
+# Gear soma attack/defense ao power, então loadout bom deixa "socar acima".
+const MinPowerBase : int = 24
+const MinPowerPerZone : int = 8
 
 # SOM-IDLE: F3 — dedicated farm spawn table (TECH_SPEC_CORE §2, spike report §5.3).
 # Farm instances stop copying the adventure-map spawn density: each zone scales
@@ -65,23 +73,29 @@ var dropItemHash : int						= DefaultDropItemHash
 var dropRatePPM : int						= DefaultDropRatePPM
 var deathTaxPct : int						= DeathTaxPct
 
-# Map-backed zone ordering: scan of data/maps/**/*.tmx by minimum mob level
-# (mob level read from presets/entities/*.tres), each map contributing one zone
-# per distinct level set. Towns (no mobs) are intentionally excluded.
+# Farm zone ordering — RECALIBRADO: os 24 mapas reais com mobs (fora os 4 de
+# boss) ordenados por dificuldade do mob dominante (nível, depois nível máx),
+# do dump de calibração. Difficuldade agora é monotônica zona a zona.
 const MapBackedNames : Array[String] = [
-	"Candor Cave", "Ship Second Deck", "Splatyna's Corridor", "Artis Sewer",
-	"Desert Mines", "Drazil", "Manayir", "Tulimshar", "Tulimshar Bay",
-	"Tulimshar Center", "Sandstorm", "Desert Mountains", "Manayir Beach",
-	"Tulimshar Beach", "Tulimshar Eastern Hills", "Tulimshar Western Hills",
-	"Desert Abandoned Level", "Desert Mountain Cave", "Tulimshar Western Cave",
-	"Desert Pit", "Tulimshar Southern Hills", "Ship Alige Hide",
-	"Splatyna's Dorian Dead End", "Splatyna's Gabriel Pit",
-	"Splatyna's Marvin Hole", "Tulimshar West Wall Pathway",
-	"Splatyna's Chamber", "Snake Pit",
+	"Candor Cave", "Splatyna's Corridor", "Ship Second Deck",
+	"Tulimshar", "Tulimshar Center", "Artis Sewer",
+	"Sandstorm", "Tulimshar Bay", "Desert Mines",
+	"Desert Abandoned Level", "Tulimshar Western Cave", "Tulimshar Eastern Hills",
+	"Ship Alige Hide", "Tulimshar West Wall Pathway", "Tulimshar Western Hills",
+	"Manayir", "Drazil", "Tulimshar Beach",
+	"Manayir Beach", "Tulimshar Southern Hills", "Desert Pit", "Snake Pit",
+	"Desert Mountain Cave", "Desert Mountains",
 ]
 
-# Zone 1 farm map: contract requires a known low-level hunting ground.
-const Zone1MapName : String = "Tulimshar Eastern Hills"
+# SOM-IDLE: salas de boss (mob único nomeado, sprite próprio) — fora do rodízio
+# de farm, viram conteúdo de boss-key (chave dropada pelos mobs de farm abre a
+# luta contra o boss; boss escala com o nível do char, recompensa com xp/drop
+# turbinados). Índice i → level do boss para escalar.
+const BossMapNames : Array[String] = [
+	"Splatyna's Dorian Dead End", "Splatyna's Gabriel Pit",
+	"Splatyna's Marvin Hole", "Splatyna's Chamber",
+]
+const BossBaseLevel : int = 5
 
 static var _catalog : Array[FarmZoneData]			= []
 static var _mapIndex : Dictionary[int, int]			= {}
@@ -112,14 +126,20 @@ static func _build():
 		if data.mapID != DB.UnknownHash:
 			_mapIndex[data.mapID] = data.id
 
-# XP_PROGRESSION.md §4.1.2: round(1200 * 1.25^(z-1)), gold = xp/8, par = 3600/(6+0.25*(z-1))
+# Curvas recalibradas sobre ZONE_COUNT (24) zonas reais:
+#   tier       = ceil(z / ZonesPerTier)      (3 zonas/tier, 8 tiers)
+#   minPower   = MinPowerBase + MinPowerPerZone*(z-1)   (escada suave, power nu
+#                do nível-intenção; gear deixa socar acima)
+#   xpPerKill  = round(1200 * 1.25^(z-1))    (curva do doc, agora termina em z24)
+#   gold       = xp/8
+#   par/h      = 3600/(24 + 0.9*(z-1))       (~150/h na z1, ~96/h na z24)
 static func _make(zoneID : int, mapName : String, mapLevel : int) -> FarmZoneData:
 	var data : FarmZoneData = FarmZoneData.new()
 	data.id = zoneID
-	data.tier = ceili(float(zoneID) / 5.0)
+	data.tier = clampi(ceili(float(zoneID) / float(ZonesPerTier)), 1, MAX_TIER)
 	data.mapName = mapName
 	data.mapLevel = mapLevel
-	data.minPower = (data.tier - 1) * TierPowerStep
+	data.minPower = MinPowerBase + MinPowerPerZone * (zoneID - 1)
 	data.xpPerKill = roundi(XpBasePerKill * pow(XpGrowthPerZone, zoneID - 1))
 	data.goldPerKill = roundi(float(data.xpPerKill) / float(GoldPerKillDiv))
 	data.parKillsPerHour = roundi(3600.0 / (float(ParBaseSeconds) + ParPerZoneSeconds * float(zoneID - 1)))
