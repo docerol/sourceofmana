@@ -138,6 +138,23 @@ static func GetWalkRatio(stat : ActorStats) -> float:
 
 # Experience management
 static func ApplyXp(agent : AIAgent):
+	# SOM-IDLE: boss-key ladder — a vitória é DECIDIDA pela luta ao vivo (o char
+	# luta com animações na frente do jogador). Se este mob é um boss da escada,
+	# quem deu o golpe final leva a recompensa do desafio e o caminho de farm
+	# comum NÃO roda (nada de xp/chave dupla). Sem um farmer como matador, o boss
+	# morreu por outro motivo → só limpa a tag.
+	if agent is MonsterAgent and (agent as MonsterAgent).idleBossIndex >= 0:
+		var bossIndex : int = (agent as MonsterAgent).idleBossIndex
+		(agent as MonsterAgent).idleBossIndex = -1
+		for entry in agent.attackers:
+			var killer : BaseAgent = entry.attacker
+			if killer == null or killer.is_queued_for_deletion():
+				continue
+			if killer is PlayerAgent and (killer as PlayerAgent).idlePolicy != null and agent.GetDamageRatio(killer) > 0.5:
+				IdlePolicyService.OnBossResult(killer as PlayerAgent, bossIndex, true)
+				break
+		return
+
 	var bonus : float = agent.stat.baseExp
 	for entry in agent.attackers:
 		if entry.attacker != null and not entry.attacker.is_queued_for_deletion():

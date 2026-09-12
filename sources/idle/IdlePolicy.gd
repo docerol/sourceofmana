@@ -55,6 +55,11 @@ var metricWalkDistance : float					= 0.0
 var _metricLastPos : Vector2					= Vector2.ZERO
 
 var currentTargetRID : int					= 0
+# SOM-IDLE: boss-key ladder — quando bossIndex>=0 o char está num duelo de boss:
+# persegue e ataca SÓ o boss (bossRID) e uma morte do char é derrota (ApplyXp
+# cuida da vitória quando o boss cai). Runtime-only.
+var bossRID : int							= 0
+var bossIndex : int							= -1
 var skillLoadout : Array[int]				= []
 var autoPotionPct : float					= 35.0
 var autoPotionItemHash : int				= 215387671		# Apple spike default
@@ -119,6 +124,17 @@ func Tick(delta : float):
 		metricWalkDistance += agent.position.distance_to(_metricLastPos)
 		_metricLastPos = agent.position
 	_tickVigor(delta)
+
+	# SOM-IDLE: boss duel — se o farmer caiu enquanto o boss ainda vive, é
+	# derrota (a chave já foi gasta no desafio). Consolação + limpa o duelo; a
+	# vitória chega por outro caminho (Formula.ApplyXp quando o boss morre).
+	if bossIndex >= 0 and not ActorCommons.IsAlive(agent):
+		var lostIndex : int = bossIndex
+		bossIndex = -1
+		bossRID = 0
+		currentTargetRID = 0
+		IdlePolicyService.OnBossResult(agent, lostIndex, false)
+		return
 
 	match state:
 		State.IDLE:
@@ -201,6 +217,12 @@ func _findNearestMob() -> AIAgent:
 	var inst : WorldInstance = _getInst()
 	if inst == null:
 		return null
+
+	# SOM-IDLE: num duelo de boss, o alvo é SEMPRE o boss (ignora o resto do farm).
+	if bossRID != 0:
+		var boss : AIAgent = WorldAgent.GetAgent(bossRID) as AIAgent
+		if boss != null and is_instance_valid(boss) and ActorCommons.IsAlive(boss):
+			return boss
 
 	var best : AIAgent = null
 	var bestDist : float = INF

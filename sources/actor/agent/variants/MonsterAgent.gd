@@ -1,6 +1,11 @@
 extends AIAgent
 class_name MonsterAgent
 
+# SOM-IDLE: boss-key ladder — quando >=0 este mob é o boss da escada (índice) e
+# sua morte entrega a recompensa do desafio (via Formula.ApplyXp) em vez do xp de
+# farm comum. É runtime-only (não persiste), resetado ao morrer.
+var idleBossIndex : int = -1
+
 #
 static func GetActorType() -> ActorCommons.Type: return ActorCommons.Type.MONSTER
 

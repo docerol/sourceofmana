@@ -46,6 +46,25 @@ static func GetBossCount() -> int:
 static func GetBossName(index : int) -> String:
 	return BossNames[index] if index >= 0 and index < BossNames.size() else ""
 
+# SOM-IDLE: hash da entidade do boss (para spawnar a luta ao vivo). Procurado
+# pelo _name do preset (Dorian/Gabriel/Marvin/Splatyna são entidades reais com
+# sprite+animação próprios). Cache por índice (DB não muda pós-boot).
+static var _entityHashCache : Dictionary = {}
+static func GetBossEntityHash(index : int) -> int:
+	if index < 0 or index >= BossNames.size():
+		return DB.UnknownHash
+	if _entityHashCache.has(index):
+		return int(_entityHashCache[index])
+	var want : String = BossNames[index]
+	var found : int = DB.UnknownHash
+	for hash in DB.EntitiesDB:
+		var data : EntityData = DB.EntitiesDB[hash]
+		if data != null and data._name == want:
+			found = int(hash)
+			break
+	_entityHashCache[index] = found
+	return found
+
 static func GetBossFloorLevel(index : int) -> int:
 	return BossFloorLevel[index] if index >= 0 and index < BossFloorLevel.size() else 1
 

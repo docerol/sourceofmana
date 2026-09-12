@@ -423,8 +423,14 @@ func BossState(state : Dictionary, _peerID : int):
 
 func BossResult(result : Dictionary, _peerID : int):
 	LastBossResult = result
-	if Launcher.GUI and Launcher.GUI.bossWindow and Launcher.GUI.bossWindow.is_visible():
-		Launcher.GUI.bossWindow.ShowResult(result)
+	var w : WindowPanel = Launcher.GUI.bossWindow if Launcher.GUI != null else null
+	if w == null:
+		return
+	if bool(result.get("started", false)):
+		w.EnterSpectate()			# some a janela: o jogador VÊ a luta animada
+		return
+	w.ShowResult(result)
+	w.ExitSpectate()				# reabre com o desfecho (se estávamos assistindo)
 
 func RefreshOnlineList(players : PackedStringArray, _peerID : int):
 	if Launcher.GUI:

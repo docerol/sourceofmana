@@ -763,41 +763,84 @@ func SuiteBossLadder(sql : SQLService, economy : EconomyService) -> void:
 		Check(bool(bosses[0].get("next", false)), "first un-beaten boss is the next target")
 		Check(bool(bosses[bosses.size() - 1].get("next", false)) == false or bosses.size() == 1, "last boss not next when beaten<last")
 
-	# Live challenge: precisa de um PlayerAgent (stats reais para a sim).
+	# --- SIM/FALLBACK contract -------------------------------------------------
+	# Sem sessão de farm ativa, StartBossFight devolve started:false e o
+	# ChallengeBoss liquida pela sim na hora (mesma janela usada pelo caminho
+	# offline). Isso testa a orquestração + SettleBossResult deterministicamente.
 	var agent : PlayerAgent = await _SpawnSimAgent(charID, 970, 1)
 	if not Check(agent != null, "boss challenge agent spawned"):
 		sql.db.delete_rows("character", "nickname = 'IdleBossTester'")
 		sql.db.delete_rows("account", "username = 'idle_boss_account'")
 		return
+	IdlePolicyService.StopIdleSession(agent)
 	sql.SetCharacterFarmZone(charID, 1)
-	# Derrota realista: char L1 nu perde para o boss L5 → consolação, chave gasta.
+	# StartBossFight precisa de uma sessão de farm ativa; sem ela o challenge cai
+	# na sim (sem spawnar arena).
+	Check(not bool(IdlePolicyService.StartBossFight(agent, 0).get("started", true)), "live: no farm session → no arena")
+	CheckEq(economy.GrantBossKey(charID, 1, "test"), 3, "topped to 3 keys for sim path")
+
 	var xpBefore : int = agent.stat.experience
 	var lose : Dictionary = economy.ChallengeBoss(charID, agent)
-	Check(bool(lose.get("ok", false)), "challenge accepted (has key)")
-	CheckEq(int(lose.get("win", -1)), 0, "naked L1 loses first boss")
-	Check(int(lose.get("xp", 0)) > 0, "defeat grants consolation xp")
-	Check(sql.GetCharacterBossKeys(charID) == 1, "defeat consumed a key")
-	CheckEq(sql.GetCharacterBossesBeaten(charID), 0, "loss does not advance ladder")
-	Check(agent.stat.experience > xpBefore, "agent xp increased by consolation")
-	# Vitória forçada: pump de stat.current (lido pelo snapshot) → win + avanço.
+	Check(bool(lose.get("ok", false)), "sim: challenge accepted (has key)")
+	Check(not bool(lose.get("started", true)), "sim: no arena → resolves synchronously")
+	CheckEq(int(lose.get("win", -1)), 0, "sim: naked L1 loses first boss")
+	Check(int(lose.get("xp", 0)) > 0, "sim: defeat grants consolation xp")
+	Check(agent.stat.experience > xpBefore, "sim: agent xp increased by consolation")
+	CheckEq(sql.GetCharacterBossKeys(charID), 2, "sim: defeat consumed a key")
+	CheckEq(sql.GetCharacterBossesBeaten(charID), 0, "sim: loss does not advance ladder")
+
 	agent.stat.current.attack = 999999
 	agent.stat.current.defense = 999999
 	agent.stat.current.maxHealth = 99999999
 	var win : Dictionary = economy.ChallengeBoss(charID, agent)
-	Check(bool(win.get("ok", false)), "second challenge accepted")
-	Check(bool(win.get("win", false)), "overpowered char beats boss")
-	CheckEq(sql.GetCharacterBossesBeaten(charID), 1, "victory advances ladder")
-	Check(int(win.get("chests", -1)) >= 1, "victory grants chest(s)")
-	CheckEq(sql.GetCharacterBossKeys(charID), 0, "key spent on the win")
-	# Sem chaves → bloqueio.
+	Check(bool(win.get("ok", false)), "sim: second challenge accepted")
+	Check(bool(win.get("win", false)), "sim: overpowered char beats boss")
+	CheckEq(sql.GetCharacterBossesBeaten(charID), 1, "sim: victory advances ladder")
+	Check(int(win.get("chests", -1)) >= 1, "sim: victory grants chest(s)")
+	CheckEq(sql.GetCharacterBossKeys(charID), 1, "sim: key spent on the win")
+
+	# zerar as chaves → bloqueio de "no key"
+	economy.SpendBossKey(charID, sql.GetCharacterBossKeys(charID), "test")
 	var noKey : Dictionary = economy.ChallengeBoss(charID, agent)
-	Check(not bool(noKey.get("ok", false)), "no-key challenge rejected")
-	CheckEq(0 if str(noKey.get("reason", "")) == "no_key" else 1, 0, "no-key reason")
-	# Escada completa.
+	Check(not bool(noKey.get("ok", false)), "sim: no-key challenge rejected")
+	CheckEq(0 if str(noKey.get("reason", "")) == "no_key" else 1, 0, "sim: no-key reason")
+	# escada completa → bloqueio
+	economy.GrantBossKey(charID, 1, "test")
 	sql.SetCharacterBossesBeaten(charID, BossService.GetBossCount())
 	var done : Dictionary = economy.ChallengeBoss(charID, agent)
-	Check(not bool(done.get("ok", false)), "ladder-complete challenge rejected")
-	CheckEq(0 if str(done.get("reason", "")) == "ladder_complete" else 1, 0, "ladder-complete reason")
+	Check(not bool(done.get("ok", false)), "sim: ladder-complete challenge rejected")
+	CheckEq(0 if str(done.get("reason", "")) == "ladder_complete" else 1, 0, "sim: ladder-complete reason")
+
+	# --- LIVE contract (costura do duelo) --------------------------------------
+	# A arena privada exige aquecimento de instância (world/timing, não determinís-
+	# tico no suite), então testamos o CONTRATO do duelo ao vivo: OnBossResult
+	# liquida recompensa + limpa o modo + guarda contra dupla contagem (a vitória
+	# chega por ApplyXp e a morte por Tick; só a primeira pode premiar).
+	sql.SetCharacterBossesBeaten(charID, 0)
+	IdlePolicyService.StartIdleSession(agent, 1)
+	for i in 16:
+		await Launcher.get_tree().process_frame
+	var policy : IdlePolicy = agent.idlePolicy
+	if Check(policy != null, "live: farm session re-attached to drive the seam"):
+		agent.idlePolicy.bossIndex = 0
+		agent.idlePolicy.bossRID = 0
+		var beatenBefore : int = sql.GetCharacterBossesBeaten(charID)
+		var chestRowsBefore : int = int(sql.QueryBindings("SELECT COUNT(*) AS c FROM chest_instance WHERE char_id = ? AND origin = 'boss';", [charID])[0]["c"])
+		IdlePolicyService.OnBossResult(agent, 0, true)
+		CheckEq(sql.GetCharacterBossesBeaten(charID), beatenBefore + 1, "live: victory settles + advances")
+		Check(int(sql.QueryBindings("SELECT COUNT(*) AS c FROM chest_instance WHERE char_id = ? AND origin = 'boss';", [charID])[0]["c"]) > chestRowsBefore, "live: victory grants a chest")
+		Check(agent.idlePolicy == null or agent.idlePolicy.bossIndex < 0, "live: boss mode cleared after settle")
+		# guarda: um segundo resultado do mesmo índice é no-op (sem dupla recompensa)
+		var chestRowsMid : int = int(sql.QueryBindings("SELECT COUNT(*) AS c FROM chest_instance WHERE char_id = ? AND origin = 'boss';", [charID])[0]["c"])
+		IdlePolicyService.OnBossResult(agent, 0, true)
+		CheckEq(sql.GetCharacterBossesBeaten(charID), beatenBefore + 1, "live: duplicate result is a no-op")
+		CheckEq(int(sql.QueryBindings("SELECT COUNT(*) AS c FROM chest_instance WHERE char_id = ? AND origin = 'boss';", [charID])[0]["c"]), chestRowsMid, "live: duplicate result grants no extra chest")
+		# derrota: não avança a escada
+		if agent.idlePolicy != null:
+			var beatenLossStart : int = sql.GetCharacterBossesBeaten(charID)
+			agent.idlePolicy.bossIndex = beatenLossStart
+			IdlePolicyService.OnBossResult(agent, beatenLossStart, false)
+			CheckEq(sql.GetCharacterBossesBeaten(charID), beatenLossStart, "live: defeat does not advance ladder")
 
 	if is_instance_valid(agent):
 		IdlePolicyService.StopIdleSession(agent)

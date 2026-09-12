@@ -172,9 +172,11 @@ func GetBossState(charID : int, playerLevel : int) -> Dictionary:
 		"bosses" = bosses,
 	}
 
-# Retorna o resultado do desafio (ok=false + reason em falha de validação).
-# `player` é o PlayerAgent online (precisamos das stats reais para a sim e para
-# entregar xp/gold no agente).
+# Desafia o próximo boss da escada. Valida + gasta a chave e INICIA a luta ao
+# vivo (IdlePolicyService.StartBossFight): o jogador VÊ o char enfrentar o boss
+# escalado com as animações reais. A recompensa é entregue depois, na morte do
+# boss (vitória) ou do char (derrota), via OnBossResult → SettleBossResult + push.
+# Sem sessão de farm ativa (ex.: challenge offline) cai na sim instantânea.
 func ChallengeBoss(charID : int, player) -> Dictionary:
 	if player == null or not is_instance_valid(player) or player.stat == null:
 		return {"ok" = false, "reason" = "not_online"}
@@ -183,8 +185,7 @@ func ChallengeBoss(charID : int, player) -> Dictionary:
 	if index >= BossService.GetBossCount():
 		return {"ok" = false, "reason" = "ladder_complete"}
 
-	# A escada é sequencial: o índice é fixo (próximo não-vencido). Se o cliente
-	# quiser insistir num boss já vencido, nada a fazer.
+	# A escada é sequencial: o índice é fixo (próximo não-vencido).
 	if Launcher.SQL.GetCharacterBossKeys(charID) < 1:
 		return {"ok" = false, "reason" = "no_key"}
 
@@ -192,9 +193,29 @@ func ChallengeBoss(charID : int, player) -> Dictionary:
 		return {"ok" = false, "reason" = "spend_failed"}
 
 	var bossLevel : int = BossService.GetBossLevel(player.stat.level, index)
-	var snapshot : Dictionary = BossService.PlayerFightSnapshot(player)
-	var duel : Dictionary = BossService.Resolve(snapshot, bossLevel)
-	var win : bool = bool(duel.get("win", false))
+	var fight : Dictionary = IdlePolicyService.StartBossFight(player, index)
+	if fight.get("started", false):
+		return {
+			"ok" = true,
+			"started" = true,
+			"index" = index,
+			"boss" = BossService.GetBossName(index),
+			"level" = bossLevel,
+			"keys" = Launcher.SQL.GetCharacterBossKeys(charID),
+		}
+
+	# Fallback sem arena (luta ao vivo indisponível): resolve pela sim e liquida
+	# na hora — a chave não é desperdiçada.
+	var duel : Dictionary = BossService.Resolve(BossService.PlayerFightSnapshot(player), bossLevel)
+	var result : Dictionary = SettleBossResult(charID, player, index, bool(duel.get("win", false)))
+	result["duration"] = roundi(float(duel.get("duration", 0.0)))
+	return result
+
+# Liquida a recompensa de um duelo de boss (chamado na vitória/derrota ao vivo OU
+# pela sim de fallback). `win` vem da luta, não daqui. Retorna o resultado p/ push.
+func SettleBossResult(charID : int, player, index : int, win : bool) -> Dictionary:
+	if player == null or not is_instance_valid(player) or player.stat == null:
+		return {"ok" = false, "reason" = "not_online", "win" = win, "index" = index}
 
 	# referência de xp = zona de farm atual do char
 	var charRow : Dictionary = Launcher.SQL.GetCharacter(charID)
@@ -224,11 +245,11 @@ func ChallengeBoss(charID : int, player) -> Dictionary:
 
 	return {
 		"ok" = true,
+		"started" = false,
 		"win" = win,
 		"index" = index,
 		"boss" = BossService.GetBossName(index),
-		"level" = bossLevel,
-		"duration" = roundf(float(duel.get("duration", 0.0))),
+		"level" = BossService.GetBossLevel(player.stat.level, index),
 		"xp" = xpGrant,
 		"gold" = goldGrant,
 		"chests" = chestsGranted,
