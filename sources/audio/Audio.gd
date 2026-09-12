@@ -19,12 +19,14 @@ func Load(soundID : int):
 
 		var soundData : FileData = DB.MusicDB.get(soundID, null)
 		if not soundData:
-			assert(false, "Could not load music database id: %s" % soundID)
+			# SOM-IDLE web-slim: a trilha pode não estar no pck (música excluída do
+			# export web por peso — hoje nada a toca). Nunca derrubar o cliente.
+			Util.PrintLog("Audio", "music track not present: %s" % str(soundID))
 			return
 
 		soundStream = soundData._resource as AudioStreamOggVorbis
 		if not soundStream:
-			assert(false, "Could not load music: %s" % soundData._name)
+			Util.PrintLog("Audio", "music stream failed to load: %s" % str(soundData._name))
 			return
 
 		soundStream.set_loop(true)
