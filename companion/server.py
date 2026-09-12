@@ -7,11 +7,21 @@ consome a fila e espelha tudo no ledger; o companion nunca toca em outras
 tabelas e nunca recebe estado de jogo.
 
 Uso:
-    SHAMBLETA_WEBHOOK_SECRET=xxx python3 companion/server.py --db /path/live.db --port 8901
-    curl localhost:8901/health
-    curl -X POST localhost:8901/webhooks/payments \
-      -H 'X-Signature: <hmac-sha256-hex do body>' \
-      -d '{"idempotency_key":"tx1","username":"Hero","kind":"gems","amount":550}'
+    # produção (assinatura Stripe + catálogo autoritativo):
+    SHAMBLETA_WEBHOOK_PROVIDER=stripe \
+    SHAMBLETA_STRIPE_WEBHOOK_SECRET=whsec_xxx \
+    python3 companion/server.py --db /data/live.db --port 8901
+      # Stripe manda Stripe-Signature: t=...,v1=... ; o checkout define
+      # metadata.shambleta_sku + client_reference_id=<account_id>.
+      # O grant usa amount/ kind do CATÁLOGO, nunca do corpo.
+
+    # sandbox/dev (assinatura por segredo compartilhado, payload plano) — só
+    # com opt-in explícito:
+    SHAMBLETA_WEBHOOK_PROVIDER=shared SHAMBLETA_WEBHOOK_SECRET=xxx \
+    SHAMBLETA_ALLOW_DEV_WEBHOOK=1 python3 companion/server.py --db /data/live.db
+      curl -X POST localhost:8901/webhooks/payments \
+        -H 'X-Signature: <hmac-sha256-hex do body>' \
+        -d '{"idempotency_key":"tx1","username":"Hero","sku":"gems.550"}'
 
 Contrato de promoção: reescrever em Go/Node + Postgres quando o CCU exigir
 (ARCHITECTURE §11). A tabela grant_queue e a semântica de idempotência não mudam.
@@ -29,6 +39,123 @@ from urllib.parse import urlparse
 
 KINDS = ("gems", "gold", "vip_days")
 DAY = 86400
+
+# --------------------------------------------------------------------------
+# SOM-IDLE (1c): webhook hardening — o companion é a fronteira de dinheiro
+# real, então NÃO pode confiar num segredo compartilhado genérico nem num
+# "amount" vindo do corpo (qualquer um com o segredo mintaria qualquer valor
+# para qualquer conta). Duas garantias:
+#   1. A assinatura é verificada com o esquema do PROVEDOR (Stripe hoje) com
+#      janela anti-replay; o segredo compartilhado vira apenas "modo dev".
+#   2. A quantidade concedida vem do CATÁLOGO de SKUs (server-authoritative);
+#      o corpo só pode REFERENCIAR um SKU, nunca ditar o montante.
+# --------------------------------------------------------------------------
+
+# Catálogo canônico (SKU -> o que comprar). Sobrescreva com um JSON via
+# SHAMBLETA_CATALOG_FILE / --catalog quando o checkout real existir. O preço
+# (`price`) fica aqui só p/ auditoria/cross-check; o que vira grant é kind+amount.
+DEFAULT_CATALOG = {
+    "gems.550":   {"kind": "gems",     "amount": 550,   "currency": "BRL", "price": 19.90},
+    "gems.1200":  {"kind": "gems",     "amount": 1200,  "currency": "BRL", "price": 39.90},
+    "gems.3000":  {"kind": "gems",     "amount": 3000,  "currency": "BRL", "price": 79.90},
+    "vip.1mo":    {"kind": "vip_days", "amount": 30,    "currency": "BRL", "price": 24.90},
+    "vip.3mo":    {"kind": "vip_days", "amount": 90,    "currency": "BRL", "price": 59.90},
+}
+
+
+def load_catalog(path):
+    if not path:
+        return dict(DEFAULT_CATALOG)
+    with open(path, "r", encoding="utf-8") as fh:
+        raw = json.load(fh)
+    for sku, e in raw.items():
+        if e.get("kind") not in KINDS or not isinstance(e.get("amount"), int) or e["amount"] <= 0:
+            raise ValueError("catalog entry %r invalid" % sku)
+    return raw
+
+
+class CatalogError(Exception):
+    pass
+
+
+def resolve_grant(catalog, sku, claimed_amount=None):
+    """Devolve (kind, authoritative_amount). Nunca usa claimed_amount como fonte
+    de verdade — só como cross-check (CDC: preço anunciado = preço cobrado)."""
+    if not sku or sku not in catalog:
+        raise CatalogError("unknown_sku")
+    entry = catalog[sku]
+    amount = entry["amount"]
+    if claimed_amount is not None and claimed_amount != amount:
+        raise CatalogError("amount_mismatch")
+    return entry["kind"], amount
+
+
+def _const_time(a, b):
+    return hmac.compare_digest(a.encode() if isinstance(a, str) else a,
+                               b.encode() if isinstance(b, str) else b)
+
+
+def verify_shared_secret(secret, header_value, raw_body):
+    """Esquema legado/sandbox: X-Signature = hex(HMAC-SHA256(secret, body))."""
+    if not secret:
+        return False
+    expect = hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return _const_time(header_value or "", expect)
+
+
+def verify_stripe_signature(secret, header_value, raw_body, tolerance=300, now=None):
+    """Esquema oficial Stripe: Stripe-Signature: 't=<ts>,v1=<sig>' onde
+    sig = hex(HMAC-SHA256(secret, '<ts>.<body>')). Recusa ts fora da janela
+    (anti-replay). Aceita se QUALQUER v1 bater."""
+    if not secret or not header_value:
+        return False
+    ts = None
+    v1 = []
+    for part in header_value.split(","):
+        part = part.strip()
+        if part.startswith("t="):
+            ts = part[2:]
+        elif part.startswith("v1="):
+            v1.append(part[3:])
+    if ts is None or not v1:
+        return False
+    try:
+        ts_int = int(ts)
+    except ValueError:
+        return False
+    if now is None:
+        now = int(time.time())
+    if abs(now - ts_int) > tolerance:
+        return False
+    signed = ("%d." % ts_int).encode() + raw_body
+    expect = hmac.new(secret.encode(), signed, hashlib.sha256).hexdigest()
+    return any(_const_time(s, expect) for s in v1)
+
+
+def normalize_event(provider, data):
+    """Reduz o corpo (formato do provedor OU flat sandbox) a um grant canônico:
+    {idempotency_key, account_id, username, sku}. Retorna None se não aplicável."""
+    if provider == "stripe":
+        # checkout.session.completed → entrega o SKU + a conta no metadata.
+        obj = (data.get("data") or {}).get("object") or {}
+        meta = obj.get("metadata") or {}
+        sku = meta.get("shambleta_sku") or obj.get("sku")
+        acct = obj.get("client_reference_id") or meta.get("shambleta_account_id")
+        key = data.get("id") or obj.get("id")  # event id = chave idempotente
+        user = meta.get("shambleta_username")
+        if acct is not None:
+            acct = int(acct)
+        else:
+            acct = None
+        return {"idempotency_key": key, "account_id": acct,
+                "username": user, "sku": sku}
+    # sandbox / dev / pix-notify simples: payload plano
+    acct = data.get("account_id")
+    if acct is not None:
+        acct = int(acct)
+    return {"idempotency_key": data.get("idempotency_key", ""),
+            "account_id": acct, "username": data.get("username"),
+            "sku": data.get("sku")}
 
 
 class Store:
@@ -163,27 +290,41 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(404, {"error": "not_found"})
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length > 0 else b""
-        secret = self.server.secret.encode()
-        sig = self.headers.get("X-Signature", "")
-        expect = hmac.new(secret, raw, hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(sig, expect):
+        provider = self.server.provider
+        # (1c) autentica a ORIGEM pelo esquema do provedor, não por segredo único.
+        if provider == "stripe":
+            ok = verify_stripe_signature(self.server.stripe_secret,
+                                         self.headers.get("Stripe-Signature", ""),
+                                         raw, self.server.tolerance)
+        elif provider == "shared":
+            # modo sandbox: só permitido explicitamente (nunca em produção).
+            ok = self.server.allow_dev and verify_shared_secret(
+                self.server.secret, self.headers.get("X-Signature", ""), raw)
+        else:
+            ok = False
+        if not ok:
             return self._send(401, {"error": "bad_signature"})
         try:
             data = json.loads(raw.decode())
         except (ValueError, UnicodeDecodeError):
             return self._send(400, {"error": "bad_json"})
-        key = data.get("idempotency_key", "")
-        kind = data.get("kind", "")
-        amount = data.get("amount", 0)
-        payload = data.get("payload", {})
-        if not key or kind not in KINDS or not isinstance(amount, int) or amount <= 0:
+        norm = normalize_event(provider, data)
+        if not norm:
+            return self._send(400, {"error": "bad_event"})
+        # (1c) o montante vem do CATÁLOGO — nunca do corpo.
+        try:
+            kind, amount = resolve_grant(
+                self.server.catalog, norm["sku"], norm.get("amount"))
+        except CatalogError as e:
+            return self._send(400, {"error": str(e)})
+        key = norm["idempotency_key"]
+        if not key:
             return self._send(400, {"error": "bad_grant"})
-        if not isinstance(payload, dict):
-            return self._send(400, {"error": "bad_payload"})
+        payload = {"sku": norm["sku"], "provider": provider, "kind": kind}
         try:
             with self.server.store.connect() as con:
                 account_id = self.server.store.account_id(
-                    con, data.get("account_id"), data.get("username"))
+                    con, norm.get("account_id"), norm.get("username"))
                 if account_id is None:
                     return self._send(404, {"error": "unknown_account"})
                 status = self.server.store.enqueue(
@@ -193,16 +334,44 @@ class Handler(BaseHTTPRequestHandler):
         self._send(200, {"status": status})
 
 
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--db", required=True, help="caminho do live.db do game server")
     ap.add_argument("--port", type=int, default=8901)
-    ap.add_argument("--secret", default=os.environ.get("SHAMBLETA_WEBHOOK_SECRET", ""),
-                    help="default: env SHAMBLETA_WEBHOOK_SECRET")
+    ap.add_argument("--provider",
+                    default=os.environ.get("SHAMBLETA_WEBHOOK_PROVIDER", "shared"),
+                    choices=("stripe", "shared"),
+                    help="esquema de assinatura a verificar (stripe = produção)")
+    ap.add_argument("--secret",
+                    default=os.environ.get("SHAMBLETA_WEBHOOK_SECRET", ""),
+                    help="segredo do modo sandbox (provider=shared)")
+    ap.add_argument("--stripe-secret",
+                    default=os.environ.get("SHAMBLETA_STRIPE_WEBHOOK_SECRET", ""),
+                    help="whsec_... do endpoint Stripe (provider=stripe)")
+    ap.add_argument("--catalog",
+                    default=os.environ.get("SHAMBLETA_CATALOG_FILE", ""),
+                    help="JSON de catálogo SKU->grant; default: embutido")
+    ap.add_argument("--tolerance", type=int,
+                    default=int(os.environ.get("SHAMBLETA_WEBHOOK_TOLERANCE", "300")),
+                    help="janela anti-replay (s)")
+    ap.add_argument("--allow-dev",
+                    default=os.environ.get("SHAMBLETA_ALLOW_DEV_WEBHOOK", "") == "1",
+                    action="store_true",
+                    help="permitir provider=shared (sandbox); NUNCA em produção")
     args = ap.parse_args()
-    if not args.secret:
-        sys.stderr.write("companion: refuse to start without a webhook secret "
-                         "(--secret ou SHAMBLETA_WEBHOOK_SECRET)\n")
+    try:
+        catalog = load_catalog(args.catalog)
+    except (ValueError, OSError, json.JSONDecodeError) as e:
+        sys.stderr.write("companion: bad catalog: %s\n" % e)
+        return 2
+    if args.provider == "stripe" and not args.stripe_secret:
+        sys.stderr.write("companion: provider=stripe exige --stripe-secret "
+                         "(SHAMBLETA_STRIPE_WEBHOOK_SECRET)\n")
+        return 2
+    if args.provider == "shared" and not (args.secret and args.allow_dev):
+        sys.stderr.write("companion: provider=shared exige --secret E --allow-dev "
+                         "(modo sandbox explícito; use provider=stripe em produção)\n")
         return 2
     if not os.path.exists(args.db):
         sys.stderr.write("companion: database not found: %s\n" % args.db)
@@ -210,13 +379,19 @@ def main():
     server = HTTPServer(("127.0.0.1", args.port), Handler)
     server.store = Store(args.db)
     server.secret = args.secret
-    print("companion: listening on 127.0.0.1:%d (db %s)" % (args.port, args.db),
-          flush=True)
+    server.provider = args.provider
+    server.stripe_secret = args.stripe_secret
+    server.catalog = catalog
+    server.tolerance = args.tolerance
+    server.allow_dev = bool(args.allow_dev)
+    print("companion: listening on 127.0.0.1:%d (db %s, provider %s, %d SKUs)"
+          % (args.port, args.db, args.provider, len(catalog)), flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     return 0
+
 
 
 if __name__ == "__main__":

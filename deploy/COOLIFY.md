@@ -22,8 +22,18 @@ Stripe/Pix sandbox ──webhook──▶ companion:8901 ──SQLite WAL──�
 1. New Resource → **Docker Compose** → aponte para o repositório (branch
    `master`), compose path: `deploy/docker-compose.yml`.
 2. No ambiente do compose, defina:
-   - `SHAMBLETA_WEBHOOK_SECRET` = segredo gerado (obrigatório — o companion
-     recusa subir sem ele).
+   - `SHAMBLETA_WEBHOOK_PROVIDER` = `stripe` (padrão, produção) ou `shared` (só
+     sandbox). O companion é **fail-closed**: com `stripe` exige
+     `SHAMBLETA_STRIPE_WEBHOOK_SECRET` (`whsec_...` do endpoint Stripe); com
+     `shared` exige `SHAMBLETA_WEBHOOK_SECRET` **e** `SHAMBLETA_ALLOW_DEV_WEBHOOK=1`
+     (este último nunca ligado enquanto houver dinheiro real).
+   - `SHAMBLETA_STRIPE_WEBHOOK_SECRET` = `whsec_...` (produção). Antes do
+     onboarding do Stripe estiver pronto, suba em modo sandbox (`shared`) só para
+     smoke-test.
+   - `SHAMBLETA_WEBHOOK_SECRET` = segredo HMAC do modo sandbox (`openssl rand -hex 32`).
+   - `SHAMBLETA_CATALOG_FILE` = vazio usa o catálogo embutido; aponte um JSON
+     SKU→grant quando o checkout real existir (o valor concedido vem do catálogo,
+     nunca do corpo do webhook).
    - `SHAMBLETA_SERVER_ADDRESS` = `ws.seudominio.com`.
    - `SHAMBLETA_OFFSITE_BACKUPS` = vazio (ou caminho de montagem offsite).
 3. Domínios por serviço (aba Domains):
@@ -71,12 +81,17 @@ reset de senha não envia e-mail.
 2. Crie conta no client → deve entrar e auto-farmar zona 1.
 3. `curl https://ws.seudominio.com` deve responder (upgrade de WS recusado em
    HTTP "puro" é esperado; o que importa é o handshake do jogo).
-4. Webhook de teste:
+4. Webhook de teste (só faz sentido em modo sandbox `shared`; agora o corpo
+   referencia um **SKU** — o valor vem do catálogo, não do corpo):
    ```bash
-   BODY='{"idempotency_key":"smoke1","username":"SeuNick","kind":"gems","amount":550}'
+   BODY='{"idempotency_key":"smoke1","username":"SeuNick","sku":"gems.550"}'
    SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SHAMBLETA_WEBHOOK_SECRET" | awk '{print $2}')
    curl -X POST https://<url-do-companion>/webhooks/payments -H "X-Signature: $SIG" -d "$BODY"
    ```
+   Em produção (`provider=stripe`) o Stripe envia `Stripe-Signature: t=...,v1=...`
+   e o `checkout.session.completed` traz `metadata.shambleta_sku` +
+   `client_reference_id=<account_id>` — o companion valida a assinatura do Stripe
+   (com janela anti-replay) e concede o **amount do catálogo** para o SKU.
    O saldo aparece no jogo com `/gems` (o server consome a fila a cada poucos
    segundos). `/health` e `/metrics` do companion ficam na rede interna —
    consulte via `docker compose exec companion wget -qO- localhost:8901/metrics`

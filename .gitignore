@@ -21,3 +21,7 @@ presets/maps/*
 
 # SOM-IDLE: local test sandbox (redirected XDG data for headless runs)
 .test-home/
+
+# Python bytecode (companion)
+__pycache__/
+*.pyc
