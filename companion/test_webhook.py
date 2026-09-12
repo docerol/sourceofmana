@@ -72,6 +72,37 @@ ok(not server.verify_stripe_signature(whsec, "t=%d,v1=%s" % (old, oldv1), body, 
    "stripe replay rejected (ts too old)")
 ok(not server.verify_stripe_signature("", hdr, body), "stripe no secret -> deny")
 
+# --- assinatura Mercado Pago (manifest oficial id:..;request-id:..;ts:..;) ---
+mpsec = "mp_secret"
+mpts = int(time.time())
+mp_data_id = "1234567890"
+mp_rid = "req-abc"
+manifest = server._mp_manifest(mp_data_id, mp_rid, str(mpts))
+ok(manifest == "id:%s;request-id:%s;ts:%d;" % (mp_data_id, mp_rid, mpts),
+   "mp manifest format")
+mpsig = hmac.new(mpsec.encode(), manifest.encode(), hashlib.sha256).hexdigest()
+ok(server.verify_mercadopago_signature(mpsec, "ts=%d,v1=%s" % (mpts, mpsig), mp_rid, mp_data_id),
+   "mp valid signature")
+ok(not server.verify_mercadopago_signature(mpsec, "ts=%d,v1=bad" % mpts, mp_rid, mp_data_id),
+   "mp bad sig")
+ok(not server.verify_mercadopago_signature(mpsec, "ts=%d,v1=%s" % (mpts, mpsig), "wrong-rid", mp_data_id),
+   "mp request-id mismatch")
+ok(not server.verify_mercadopago_signature(mpsec, "ts=%d,v1=%s" % (mpts, mpsig), mp_rid, "other-id"),
+   "mp data.id mismatch")
+ok(not server.verify_mercadopago_signature("", "ts=%d,v1=%s" % (mpts, mpsig), mp_rid, mp_data_id),
+   "mp no secret -> deny")
+oldts = mpts - 100000
+oldman = server._mp_manifest(mp_data_id, mp_rid, str(oldts))
+oldsig = hmac.new(mpsec.encode(), oldman.encode(), hashlib.sha256).hexdigest()
+ok(not server.verify_mercadopago_signature(mpsec, "ts=%d,v1=%s" % (oldts, oldsig), mp_rid, mp_data_id, 300),
+   "mp replay rejected (ts too old)")
+man2 = server._mp_manifest(mp_data_id, "", str(mpts))
+ok(man2 == "id:%s;ts:%d;" % (mp_data_id, mpts), "mp manifest omits empty request-id")
+sig2 = hmac.new(mpsec.encode(), man2.encode(), hashlib.sha256).hexdigest()
+ok(server.verify_mercadopago_signature(mpsec, "ts=%d,v1=%s" % (mpts, sig2), "", mp_data_id),
+   "mp valid without request-id")
+ok(server._mp_manifest("ABC123", "", "5") == "id:abc123;ts:5;", "mp data.id lowercased")
+
 # --- normalização de evento ---
 stripe_evt = {
     "id": "evt_123",
@@ -89,6 +120,20 @@ flat = {"idempotency_key": "tx1", "username": "Hero", "sku": "gems.550"}
 nf = server.normalize_event("shared", flat)
 ok(nf["username"] == "Hero" and nf["sku"] == "gems.550" and nf["account_id"] is None,
    "sandbox flat -> canonical grant")
+
+# --- normalização Mercado Pago (payment re-buscado + sandbox) ---
+a, s = server.parse_external_reference("42:gems.1200")
+ok(a == 42 and s == "gems.1200", "parse external_reference acct:sku")
+ok(server.parse_external_reference("garbage") == (None, None), "parse external_reference junk")
+pay = {"id": "9001", "status": "approved", "external_reference": "1:gems.550"}
+np = server.normalize_event("mercadopago", pay)
+ok(np["account_id"] == 1 and np["sku"] == "gems.550" and np["idempotency_key"] == "9001",
+   "mp approved payment -> grant")
+pend = dict(pay); pend["status"] = "pending"
+ok(server.normalize_event("mercadopago", pend) is None, "mp pending payment -> no grant")
+mpflat = {"idempotency_key": "mp1", "account_id": "7", "sku": "gems.1200"}
+nfmp = server.normalize_event("mercadopago", mpflat)
+ok(nfmp["account_id"] == 7 and nfmp["sku"] == "gems.1200", "mp sandbox flat body -> grant")
 
 # --- idempotência do enqueue (schema grant_queue real) ---
 tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)

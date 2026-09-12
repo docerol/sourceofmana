@@ -30,20 +30,26 @@ O que **depende de terceiros** e por isso NÃO foi (nem pode ser) codado aqui.
 - **Classificação indicativa (CLASSIND/ERB)** para o país-alvo antes de monetizar
   público menor.
 
-## 2. Pagamentos (onboarding de gateway)
-- **Pix-first + cartão 3DS** (recomendação `MONETIZATION.md`). Abrir conta em um
-  PSP (Stripe/Asaas/Efí/Mercado Pago…), obter **`whsec_…`** do endpoint de
-  webhook e configurar `SHAMBLETA_WEBHOOK_PROVIDER=stripe` +
-  `SHAMBLETA_STRIPE_WEBHOOK_SECRET` (o companion é fail-closed sem isso).
-- **Catálogo real**: publicar os SKUs/precos em `SHAMBLETA_CATALOG_FILE` (JSON)
-  igualando preço anunciado = cobrado; o `DEFAULT_CATALOG` é placeholder.
+## 2. Pagamentos (onboarding de gateway) — **provedor: Mercado Pago**
+- Abrir conta **Mercado Pago** como PJ e criar a aplicação/integração de checkout.
+  Configurar o endpoint de **webhook (v2)** apontando para o companion
+  (`/webhooks/payments`), gerar a **credencial/secret** do webhook e setar
+  `SHAMBLETA_WEBHOOK_PROVIDER=mercadopago` + `SHAMBLETA_MP_WEBHOOK_SECRET=<secret>`
+  + `SHAMBLETA_MP_ACCESS_TOKEN=<access_token>` (o companion é fail-closed sem o
+  secret). Com o access_token, ele **re-busca o pagamento** na API do MP e só
+  concede com `status=approved` — não confia no corpo.
+- **Contrato do checkout**: criar a preferência/payment com
+  `external_reference = "<account_id>:<sku>"` (o companion faz o parse disso no
+  pagamento re-buscado). Manter `SHAMBLETA_CATALOG_FILE` com o **mesmo** preço
+  anunciado = cobrado; o amount concedido vem do catálogo, nunca do corpo.
+- **Catálogo real**: publicar SKUs/preços (Pix + cartão) em `SHAMBLETA_CATALOG_FILE`
+  (JSON). O `DEFAULT_CATALOG` é placeholder.
 - **Checkout "comprar gems"** no cliente: hoje só há o caminho de gasto de gems
-  (Shop). Falta a tela de compra que cria a sessão de pagamento no PSP e guarda o
-  `client_reference_id=<account_id>` + `metadata.shambleta_sku` (o normalizador
-  do webhook já consome esses campos). O grant entra pelo `grant_queue` idempotente.
+  (Shop). Falta a tela que inicia o payment do MP e guarda `external_reference`.
+  O grant entra pelo `grant_queue` idempotente (chave = payment id).
 - **Reembolso do dinheiro**: `RequestGemRefund` reverte as gems + marca
-  `grant_queue.status='refunded'`; falta o companion chamar a API de refund do
-  PSP ao ver esse estado (exige a conta do gateway).
+  `grant_queue.status='refunded'`; falta o companion chamar a API de refund do MP
+  (`/v1/payments/{id}/refunds`) ao ver esse estado (exige a conta do gateway).
 
 ## 3. Operação
 - **Backups offsite testados**: `SHAMBLETA_OFFSITE_BACKUPS` + restore probe já

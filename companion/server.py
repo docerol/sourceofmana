@@ -1,19 +1,28 @@
 #!/usr/bin/env python3
 """Shambleta companion v0 — fronteira de dinheiro real (SOM-IDLE C1).
 
-Recebe webhooks de pagamento (Stripe/Pix sandbox) e grava grants idempotentes
-na tabela grant_queue do MESMO SQLite do game server (modo WAL). O game server
-consome a fila e espelha tudo no ledger; o companion nunca toca em outras
-tabelas e nunca recebe estado de jogo.
+Recebe webhooks de pagamento (Mercado Pago / Stripe / Pix sandbox) e grava
+grants idempotentes na tabela grant_queue do MESMO SQLite do game server (modo
+WAL). O game server consome a fila e espelha tudo no ledger; o companion nunca
+toca em outras tabelas e nunca recebe estado de jogo.
 
 Uso:
-    # produção (assinatura Stripe + catálogo autoritativo):
-    SHAMBLETA_WEBHOOK_PROVIDER=stripe \
-    SHAMBLETA_STRIPE_WEBHOOK_SECRET=whsec_xxx \
+    # produção Mercado Pago (assinatura x-signature + re-fetch autoritativo):
+    SHAMBLETA_WEBHOOK_PROVIDER=mercadopago \
+    SHAMBLETA_MP_WEBHOOK_SECRET=<credencial do endpoint> \
+    SHAMBLETA_MP_ACCESS_TOKEN=<access_token> \
     python3 companion/server.py --db /data/live.db --port 8901
+      # MP manda x-signature: ts=...,v1=... (HMAC sobre o manifest
+      # id:<data.id>;request-id:<x-request-id>;ts:<ts>;). O companion valida a
+      # assinatura e RE-BUSCA o pagamento na API MP (autoritativo): status
+      # approved + external_reference="<account_id>:<sku>". Sem access_token usa
+      # o corpo plano (só sandbox/teste). O grant usa kind/amount do CATÁLOGO.
+
+    # alternativa Stripe (assinatura Stripe-Signature + catálogo autoritativo):
+    SHAMBLETA_WEBHOOK_PROVIDER=stripe SHAMBLETA_STRIPE_WEBHOOK_SECRET=whsec_xxx \
+    python3 companion/server.py --db /data/live.db
       # Stripe manda Stripe-Signature: t=...,v1=... ; o checkout define
       # metadata.shambleta_sku + client_reference_id=<account_id>.
-      # O grant usa amount/ kind do CATÁLOGO, nunca do corpo.
 
     # sandbox/dev (assinatura por segredo compartilhado, payload plano) — só
     # com opt-in explícito:
@@ -35,7 +44,7 @@ import sqlite3
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 
 KINDS = ("gems", "gold", "vip_days")
 DAY = 86400
@@ -159,6 +168,81 @@ def verify_stripe_signature(secret, header_value, raw_body, tolerance=300, now=N
     return any(_const_time(s, expect) for s in v1)
 
 
+def _mp_manifest(data_id, request_id, ts):
+    """Mercado Pago: 'id:<data.id>;request-id:<x-request-id>;ts:<ts>;' — cada
+    seção termina em ';' e é OMITIDA se o valor estiver ausente (esquema oficial).
+    data.id é minúsculo se alfanumérico."""
+    if data_id and data_id.isalnum():
+        data_id = data_id.lower()
+    parts = []
+    if data_id:
+        parts.append("id:%s;" % data_id)
+    if request_id:
+        parts.append("request-id:%s;" % request_id)
+    if ts:
+        parts.append("ts:%s;" % ts)
+    return "".join(parts)
+
+
+def verify_mercadopago_signature(secret, header_value, request_id, data_id,
+                                 tolerance=300, now=None):
+    """Esquema oficial MP (x-signature: 'ts=<ts>,v1=<sig>'):
+    sig = hex(HMAC-SHA256(secret, _mp_manifest(data_id, request_id, ts))).
+    Recusa ts fora da janela (anti-replay). Aceita se QUALQUER v1 bater."""
+    if not secret or not header_value:
+        return False
+    ts = None
+    v1 = []
+    for part in header_value.split(","):
+        part = part.strip()
+        if part.startswith("ts="):
+            ts = part[3:]
+        elif part.startswith("v1="):
+            v1.append(part[3:])
+    if ts is None or not v1:
+        return False
+    try:
+        ts_int = int(ts)
+    except ValueError:
+        return False
+    if now is None:
+        now = int(time.time())
+    if abs(now - ts_int) > tolerance:
+        return False
+    expect = hmac.new(secret.encode(),
+                      _mp_manifest(data_id, request_id, ts).encode(),
+                      hashlib.sha256).hexdigest()
+    return any(_const_time(s, expect) for s in v1)
+
+
+def parse_external_reference(external_reference):
+    """Checkout define external_reference = '<account_id>:<sku>'. Retorna
+    (account_id:int|None, sku:str|None)."""
+    if not external_reference or ":" not in str(external_reference):
+        return None, None
+    acct, _, sku = str(external_reference).partition(":")
+    acct = acct.strip()
+    sku = sku.strip()
+    return (int(acct) if acct.isdigit() else None), (sku or None)
+
+
+def mp_fetch_payment(payment_id, access_token):
+    """Re-fetch autoritativo na API MP (padrão oficial): o corpo do webhook só traz
+    data.id; o status/valor/external_reference vêm daqui (TLS MP). Retorna dict ou None."""
+    if not payment_id or not access_token:
+        return None
+    import urllib.request
+    import urllib.parse
+    url = ("https://api.mercadopago.com/v1/payments/%s?access_token=%s"
+           % (urllib.parse.quote(str(payment_id)), urllib.parse.quote(access_token)))
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            return json.loads(resp.read().decode())
+    except Exception as e:  # rede/JSON/HTTP → None (MP reenvia)
+        alert("mercadopago refetch failed: %s" % e)
+        return None
+
+
 def normalize_event(provider, data):
     """Reduz o corpo (formato do provedor OU flat sandbox) a um grant canônico:
     {idempotency_key, account_id, username, sku}. Retorna None se não aplicável."""
@@ -176,6 +260,27 @@ def normalize_event(provider, data):
             acct = None
         return {"idempotency_key": key, "account_id": acct,
                 "username": user, "sku": sku}
+    if provider == "mercadopago":
+        # sandbox/teste: corpo plano já traz os campos.
+        if data.get("account_id") is not None or data.get("sku") is not None:
+            acct = data.get("account_id")
+            return {"idempotency_key": data.get("idempotency_key") or data.get("id"),
+                    "account_id": int(acct) if acct is not None else None,
+                    "username": data.get("username"), "sku": data.get("sku")}
+        # produção: `data` é o PAYMENT re-buscado na API MP (autoritativo).
+        status = str(data.get("status", ""))
+        if status and status not in ("approved", "authorized_payment"):
+            return None  # pendente/recusado/estornado → sem grant
+        meta = data.get("metadata") or {}
+        acct, sku = parse_external_reference(data.get("external_reference"))
+        if sku is None:
+            sku = meta.get("shambleta_sku")
+        if acct is None and meta.get("shambleta_account_id") is not None:
+            acct = int(meta.get("shambleta_account_id"))
+        key = data.get("id")  # payment id = chave idempotente
+        return {"idempotency_key": str(key) if key is not None else "",
+                "account_id": acct, "username": meta.get("shambleta_username"),
+                "sku": sku}
     # sandbox / dev / pix-notify simples: payload plano
     acct = data.get("account_id")
     if acct is not None:
@@ -313,31 +418,68 @@ class Handler(BaseHTTPRequestHandler):
         return self._send(404, {"error": "not_found"})
 
     def do_POST(self):
-        if urlparse(self.path).path != "/webhooks/payments":
+        parsed = urlparse(self.path)
+        if parsed.path != "/webhooks/payments":
             return self._send(404, {"error": "not_found"})
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length) if length > 0 else b""
         provider = self.server.provider
         # (1c) autentica a ORIGEM pelo esquema do provedor, não por segredo único.
-        if provider == "stripe":
-            ok = verify_stripe_signature(self.server.stripe_secret,
-                                         self.headers.get("Stripe-Signature", ""),
-                                         raw, self.server.tolerance)
-        elif provider == "shared":
-            # modo sandbox: só permitido explicitamente (nunca em produção).
-            ok = self.server.allow_dev and verify_shared_secret(
-                self.server.secret, self.headers.get("X-Signature", ""), raw)
+        if provider == "mercadopago":
+            # MP assina sobre o QUERY param data.id (não o corpo); o corpo do
+            # webhook só traz o id → status/valor/external_reference são
+            # autoritativos via re-fetch na API MP (padrão oficial) quando há token.
+            data_id = (parse_qs(parsed.query).get("data.id") or [None])[0]
+            # nem todo formato do MP coloca data.id na query; fallback: corpo plano
+            if data_id is None and raw:
+                try:
+                    _d = json.loads(raw.decode())
+                except (ValueError, UnicodeDecodeError):
+                    _d = {}
+                _dat = _d.get("data")
+                if isinstance(_dat, dict):
+                    data_id = _dat.get("id")
+                else:
+                    data_id = _d.get("data.id") or _d.get("resource")
+            ok = verify_mercadopago_signature(
+                self.server.mp_secret,
+                self.headers.get("x-signature", ""),
+                self.headers.get("x-request-id", ""),
+                data_id, self.server.tolerance)
+            if not ok:
+                return self._send(401, {"error": "bad_signature"})
+            if self.server.mp_access_token and data_id:
+                payload_data = mp_fetch_payment(data_id, self.server.mp_access_token)
+                if payload_data is None:
+                    return self._send(502, {"error": "refetch_failed"})  # MP reenvia
+            else:
+                # sandbox/teste sem token: corpo plano já traz account_id/sku.
+                try:
+                    payload_data = json.loads(raw.decode()) if raw else {}
+                except (ValueError, UnicodeDecodeError):
+                    return self._send(400, {"error": "bad_json"})
         else:
-            ok = False
-        if not ok:
-            return self._send(401, {"error": "bad_signature"})
-        try:
-            data = json.loads(raw.decode())
-        except (ValueError, UnicodeDecodeError):
-            return self._send(400, {"error": "bad_json"})
-        norm = normalize_event(provider, data)
+            if provider == "stripe":
+                ok = verify_stripe_signature(self.server.stripe_secret,
+                                             self.headers.get("Stripe-Signature", ""),
+                                             raw, self.server.tolerance)
+            elif provider == "shared":
+                # modo sandbox: só permitido explicitamente (nunca em produção).
+                ok = self.server.allow_dev and verify_shared_secret(
+                    self.server.secret, self.headers.get("X-Signature", ""), raw)
+            else:
+                ok = False
+            if not ok:
+                return self._send(401, {"error": "bad_signature"})
+            try:
+                payload_data = json.loads(raw.decode())
+            except (ValueError, UnicodeDecodeError):
+                return self._send(400, {"error": "bad_json"})
+        norm = normalize_event(provider, payload_data)
         if not norm:
-            return self._send(400, {"error": "bad_event"})
+            # evento legítimo de não-entrega (ex.: MP pendente/estornado) → ACK 200
+            # para o provedor parar de reenviar; nada é concedido.
+            return self._send(200, {"status": "ignored"})
         # (1c) o montante vem do CATÁLOGO — nunca do corpo.
         try:
             kind, amount = resolve_grant(
@@ -370,14 +512,21 @@ def main():
     ap.add_argument("--port", type=int, default=8901)
     ap.add_argument("--provider",
                     default=os.environ.get("SHAMBLETA_WEBHOOK_PROVIDER", "shared"),
-                    choices=("stripe", "shared"),
-                    help="esquema de assinatura a verificar (stripe = produção)")
+                    choices=("mercadopago", "stripe", "shared"),
+                    help="esquema de assinatura a verificar (mercadopago = produção)")
     ap.add_argument("--secret",
                     default=os.environ.get("SHAMBLETA_WEBHOOK_SECRET", ""),
                     help="segredo do modo sandbox (provider=shared)")
     ap.add_argument("--stripe-secret",
                     default=os.environ.get("SHAMBLETA_STRIPE_WEBHOOK_SECRET", ""),
                     help="whsec_... do endpoint Stripe (provider=stripe)")
+    ap.add_argument("--mp-secret",
+                    default=os.environ.get("SHAMBLETA_MP_WEBHOOK_SECRET", ""),
+                    help="segredo (credencial) do webhook Mercado Pago (provider=mercadopago)")
+    ap.add_argument("--mp-access-token",
+                    default=os.environ.get("SHAMBLETA_MP_ACCESS_TOKEN", ""),
+                    help="access_token MP p/ re-fetch autoritativo do pagamento "
+                         "(provider=mercadopago; sem ele usa o corpo plano p/ sandbox)")
     ap.add_argument("--catalog",
                     default=os.environ.get("SHAMBLETA_CATALOG_FILE", ""),
                     help="JSON de catálogo SKU->grant; default: embutido")
@@ -398,9 +547,13 @@ def main():
         sys.stderr.write("companion: provider=stripe exige --stripe-secret "
                          "(SHAMBLETA_STRIPE_WEBHOOK_SECRET)\n")
         return 2
+    if args.provider == "mercadopago" and not args.mp_secret:
+        sys.stderr.write("companion: provider=mercadopago exige --mp-secret "
+                         "(SHAMBLETA_MP_WEBHOOK_SECRET)\n")
+        return 2
     if args.provider == "shared" and not (args.secret and args.allow_dev):
         sys.stderr.write("companion: provider=shared exige --secret E --allow-dev "
-                         "(modo sandbox explícito; use provider=stripe em produção)\n")
+                         "(modo sandbox explícito; use provider=mercadopago em produção)\n")
         return 2
     if not os.path.exists(args.db):
         sys.stderr.write("companion: database not found: %s\n" % args.db)
@@ -416,6 +569,8 @@ def main():
     server.secret = args.secret
     server.provider = args.provider
     server.stripe_secret = args.stripe_secret
+    server.mp_secret = args.mp_secret
+    server.mp_access_token = args.mp_access_token
     server.catalog = catalog
     server.tolerance = args.tolerance
     server.allow_dev = bool(args.allow_dev)

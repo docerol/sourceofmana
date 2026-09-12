@@ -7,7 +7,7 @@ nginx), `game` (server headless Godot, WebSocket plain :6108), `companion`
 ```
 Browser ──wss 443──▶ Coolify proxy (TLS) ──ws──▶ game:6108
 Browser ──https 443─▶ Coolify proxy (TLS) ──80──▶ web (nginx, COOP/COEP)
-Stripe/Pix sandbox ──webhook──▶ companion:8901 ──SQLite WAL──▶ live.db ◀── game
+Mercado Pago / Stripe / Pix sandbox ──webhook──▶ companion:8901 ──SQLite WAL──▶ live.db ◀── game
 ```
 
 ## 1. Pré-requisitos
@@ -22,14 +22,21 @@ Stripe/Pix sandbox ──webhook──▶ companion:8901 ──SQLite WAL──�
 1. New Resource → **Docker Compose** → aponte para o repositório (branch
    `master`), compose path: `deploy/docker-compose.yml`.
 2. No ambiente do compose, defina:
-   - `SHAMBLETA_WEBHOOK_PROVIDER` = `stripe` (padrão, produção) ou `shared` (só
-     sandbox). O companion é **fail-closed**: com `stripe` exige
-     `SHAMBLETA_STRIPE_WEBHOOK_SECRET` (`whsec_...` do endpoint Stripe); com
-     `shared` exige `SHAMBLETA_WEBHOOK_SECRET` **e** `SHAMBLETA_ALLOW_DEV_WEBHOOK=1`
-     (este último nunca ligado enquanto houver dinheiro real).
-   - `SHAMBLETA_STRIPE_WEBHOOK_SECRET` = `whsec_...` (produção). Antes do
-     onboarding do Stripe estiver pronto, suba em modo sandbox (`shared`) só para
-     smoke-test.
+   - `SHAMBLETA_WEBHOOK_PROVIDER` = `mercadopago` (padrão, produção), `stripe`
+     (alternativa) ou `shared` (só sandbox). O companion é **fail-closed**: com
+     `mercadopago` exige `SHAMBLETA_MP_WEBHOOK_SECRET`; com `stripe` exige
+     `SHAMBLETA_STRIPE_WEBHOOK_SECRET` (`whsec_...`); com `shared` exige
+     `SHAMBLETA_WEBHOOK_SECRET` **e** `SHAMBLETA_ALLOW_DEV_WEBHOOK=1` (este último
+     nunca ligado enquanto houver dinheiro real).
+   - `SHAMBLETA_MP_WEBHOOK_SECRET` = a **credencial/secret** que você cadastra no
+     endpoint de webhook do painel do Mercado Pago (o MP usa esse segredo para
+     assinar o header `x-signature`). Antes do onboarding do MP estiver pronto,
+     suba em modo sandbox (`shared`) só para smoke-test.
+   - `SHAMBLETA_MP_ACCESS_TOKEN` = access_token privado do MP. Quando presente, o
+     companion **re-busca o pagamento** na API do MP (autoritativo: status
+     `approved` + `external_reference="<account_id>:<sku>"`). Sem ele, só o corpo
+     plano é aceito (sandbox/teste) — em produção **configure o token**.
+   - `SHAMBLETA_STRIPE_WEBHOOK_SECRET` = `whsec_...` (só se usar provider=stripe).
    - `SHAMBLETA_WEBHOOK_SECRET` = segredo HMAC do modo sandbox (`openssl rand -hex 32`).
    - `SHAMBLETA_CATALOG_FILE` = vazio usa o catálogo embutido; aponte um JSON
      SKU→grant quando o checkout real existir (o valor concedido vem do catálogo,
@@ -88,10 +95,7 @@ reset de senha não envia e-mail.
    SIG=$(printf '%s' "$BODY" | openssl dgst -sha256 -hmac "$SHAMBLETA_WEBHOOK_SECRET" | awk '{print $2}')
    curl -X POST https://<url-do-companion>/webhooks/payments -H "X-Signature: $SIG" -d "$BODY"
    ```
-   Em produção (`provider=stripe`) o Stripe envia `Stripe-Signature: t=...,v1=...`
-   e o `checkout.session.completed` traz `metadata.shambleta_sku` +
-   `client_reference_id=<account_id>` — o companion valida a assinatura do Stripe
-   (com janela anti-replay) e concede o **amount do catálogo** para o SKU.
+   Em produção (`provider=mercadopago`) o MP envia `x-signature: ts=...,v1=...` (HMAC sobre `id:<data.id>;request-id:<x-request-id>;ts:<ts>;`); o companion valida com anti-replay e **re-busca o pagamento** na API do MP (`external_reference="<account_id>:<sku>"`, concede só se `status=approved`) — o **amount vem do catálogo**, nunca do corpo. (Em `provider=stripe`, o `checkout.session.completed` traz `metadata.shambleta_sku` + `client_reference_id=<account_id>`.)
    O saldo aparece no jogo com `/gems` (o server consome a fila a cada poucos
    segundos). `/health` e `/metrics` do companion ficam na rede interna —
    consulte via `docker compose exec companion wget -qO- localhost:8901/metrics`
@@ -109,7 +113,7 @@ reset de senha não envia e-mail.
 
 ## 6. Limitações conhecidas (beta)
 
-- **Peso do primeiro load**: ~62 MB gzip hoje (meta <25 MB).Principal culpado:
+- **Peso do primeiro load**: ~32 MB gzip hoje (meta <25 MB).Principal culpado:
   `data/music` (26 MB embutidos no pck). Mitigação futura: stream/cache de
   música via PWA. Navegador moderno + boa conexão suportam; avise os testers.
 - **SQLite compartilhado game+companion** só é válido em single-node (é o

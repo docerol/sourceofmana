@@ -49,9 +49,11 @@ services:
       dockerfile: deploy/companion/Dockerfile
     restart: unless-stopped
     environment:
-      # (1c) produção valida assinatura Stripe; só troque p/ "shared" + allow-dev
-      # num sandbox local — nunca junto de dinheiro real.
-      SHAMBLETA_WEBHOOK_PROVIDER: ${SHAMBLETA_WEBHOOK_PROVIDER:-stripe}
+      # (1c) produção valida assinatura do provedor (Mercado Pago); só troque
+      # p/ "shared" + allow-dev num sandbox local — nunca junto de dinheiro real.
+      SHAMBLETA_WEBHOOK_PROVIDER: ${SHAMBLETA_WEBHOOK_PROVIDER:-mercadopago}
+      SHAMBLETA_MP_WEBHOOK_SECRET: ${SHAMBLETA_MP_WEBHOOK_SECRET:-}
+      SHAMBLETA_MP_ACCESS_TOKEN: ${SHAMBLETA_MP_ACCESS_TOKEN:-}
       SHAMBLETA_STRIPE_WEBHOOK_SECRET: ${SHAMBLETA_STRIPE_WEBHOOK_SECRET:-}
       SHAMBLETA_WEBHOOK_SECRET: ${SHAMBLETA_WEBHOOK_SECRET:-}
       SHAMBLETA_ALLOW_DEV_WEBHOOK: ${SHAMBLETA_ALLOW_DEV_WEBHOOK:-}
