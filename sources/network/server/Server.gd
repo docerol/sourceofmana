@@ -42,6 +42,18 @@ func DeleteAccount(peerID : int):
 	Network.AccountErased(peerID)
 	DisconnectAccount(peerID)
 
+# SOM-IDLE (1d) CDC art.49: reembolso de gem (dono logado). EconomyService decide
+# (janela 7d / gems não gastas / já reembolsado) e reverte o saldo + ledger.
+func RequestRefund(idempotencyKey : String, peerID : int):
+	var accountID : int = Peers.GetAccount(peerID)
+	if accountID == NetworkCommons.PeerUnknownID:
+		Network.RefundResult({"ok" = false, "reason" = "not_authenticated"}, peerID)
+		return
+	var result : Dictionary = Launcher.Economy.RequestGemRefund(accountID, idempotencyKey)
+	if result.get("ok", false):
+		Util.PrintLog("Economy", "LGPD/CDC: refund granted account %d key %s amount %d" % [accountID, idempotencyKey, int(result.get("amount", 0))])
+	Network.RefundResult(result, peerID)
+
 func LoginWithPassword(accountName : String, password : String, rememberMe : bool, platform : int, peerID : int):
 	var err : NetworkCommons.AuthError = NetworkCommons.AuthError.ERR_OK
 	var peer : Peers.Peer = Peers.GetPeer(peerID)

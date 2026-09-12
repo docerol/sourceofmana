@@ -688,6 +688,56 @@ func _ApplyGrantRaw(grant : Dictionary) -> bool:
 		return _LedgerAppendLocked(accountID, 0, "vip", amount, until, "grant:%s" % str(grant["idempotency_key"]))
 	return false
 
+# ------------------------------------------------------------------ CDC art.49 — direito de arrependimento
+# Compra à distância: o consumidor desiste em 7 dias. Como gems são fungíveis,
+# "não consumidas" = o saldo atual cobre o montante comprado. Regras (na ordem):
+#   não_found / window_expired / already_refunded / gems_consumed.
+# O estorno do DINHEIRO cabe ao companion/provedor (onboarding pendente — handoff);
+# aqui o jogo reverte as gems + grava no ledger (prova de auditoria, append-only).
+const RefundWindowSeconds : int = 7 * 86400
+
+func RequestGemRefund(accountID : int, idempotencyKey : String) -> Dictionary:
+	if idempotencyKey.is_empty():
+		return {"ok" = false, "reason" = "bad_request"}
+	var sql : SQLService = Launcher.SQL
+	var now : int = SQLCommons.Timestamp()
+	# (1) a compra original: linha de ledger gems criada por grant:<key>
+	var buys : Array[Dictionary] = sql.QueryBindings(
+		"SELECT id, amount, created_at FROM ledger_transaction WHERE account_id = ? AND kind = ? AND reason = ? ORDER BY id LIMIT 1;",
+		[accountID, LedgerKindGems, "grant:" + idempotencyKey])
+	if buys.is_empty():
+		return {"ok" = false, "reason" = "not_found"}
+	var amount : int = int(buys[0]["amount"])
+	if amount <= 0:
+		return {"ok" = false, "reason" = "not_found"}
+	# (2) janela de 7 dias
+	if now - int(buys[0]["created_at"]) > RefundWindowSeconds:
+		return {"ok" = false, "reason" = "window_expired"}
+	# (3) já reembolsada? (linha refund:<key>)
+	if not sql.QueryBindings("SELECT id FROM ledger_transaction WHERE account_id = ? AND reason = ?;", [accountID, "refund:" + idempotencyKey]).is_empty():
+		return {"ok" = false, "reason" = "already_refunded"}
+	# (4) gems não consumidas: saldo atual >= montante comprado
+	if sql.GetGems(accountID) < amount:
+		return {"ok" = false, "reason" = "gems_consumed"}
+	# aplica o estorno de forma atômica (re-verifica o saldo sob o lock)
+	var applied : bool = false
+	settleMutex.lock()
+	if sql.Transaction(func() -> bool:
+		var current : int = sql.GetGemsRaw(accountID)
+		if current < amount:
+			return false
+		if not sql.SetGemsRaw(accountID, current - amount):
+			return false
+		if not _LedgerAppendLocked(accountID, 0, LedgerKindGems, -amount, current - amount, "refund:" + idempotencyKey):
+			return false
+		sql.db.query_with_bindings("UPDATE grant_queue SET status = 'refunded', processed_at = ? WHERE idempotency_key = ? AND account_id = ?;", [now, idempotencyKey, accountID])
+		return true):
+		applied = true
+	settleMutex.unlock()
+	if not applied:
+		return {"ok" = false, "reason" = "gems_consumed"}
+	return {"ok" = true, "reason" = "refunded", "amount" = amount}
+
 # ------------------------------------------------------------------ E1: guilds
 
 const GuildCreateCostGold : int = 5000

@@ -1711,3 +1711,42 @@ func SuiteLGPD(sql : SQLService):
 	CheckEq(int(sql.QueryBindings("SELECT COUNT(*) AS c FROM ledger_transaction WHERE account_id = ?;", [accountID])[0]["c"]), ledgerBefore, "lgpd: LEDGER preserved (fiscal retention)")
 	Check(sql.ValidateAuthPassword(acct, pw) == null, "lgpd: old login refused after erase")
 	Check(not sql.EraseAccount(accountID), "lgpd: erase is idempotent (already deleted)")
+
+# ------------------------------------------------------------------ CDC art.49 refund
+func SuiteRefund(sql : SQLService) -> void:
+	print("[suite] CDC refund (art.49)")
+	var economy : EconomyService = Launcher.Economy
+	var tag : int = SQLCommons.Timestamp()
+	var charID : int = CreateFixture(sql, "idle_refund_%d" % tag, "IdleRefund%d" % tag)
+	if not Check(charID != 0, "refund fixture created"):
+		return
+	var accountID : int = sql.GetAccountIDForCharacter(charID)
+	CheckEq(sql.GetGems(accountID), 0, "refund: fresh account zero gems")
+
+	# caminho feliz: compra → reembolso em até 7 dias, gems não gastas
+	var key : String = "r-buy1-%d" % tag
+	Check(economy.EnqueueGrant(accountID, "gems", 550, key), "refund: purchase enqueued")
+	economy.ProcessPendingGrants(50)
+	CheckEq(sql.GetGems(accountID), 550, "refund: gems credited")
+	var r : Dictionary = economy.RequestGemRefund(accountID, key)
+	Check(bool(r.get("ok", false)), "refund: approved (7d, unconsumed)")
+	CheckEq(int(r.get("amount", 0)), 550, "refund: amount = purchase")
+	CheckEq(sql.GetGems(accountID), 0, "refund: gems reversed")
+	Check(not sql.QueryBindings("SELECT id FROM ledger_transaction WHERE account_id = ? AND reason = ?;", [accountID, "refund:" + key]).is_empty(), "refund: ledger row appended")
+	var gst : Array = sql.QueryBindings("SELECT status FROM grant_queue WHERE idempotency_key = ?;", [key])
+	Check(not gst.is_empty() and str(gst[0]["status"]) == "refunded", "refund: grant_queue marked refunded")
+	Check(str(economy.RequestGemRefund(accountID, key).get("reason", "")) == "already_refunded", "refund: double refund denied")
+	Check(str(economy.RequestGemRefund(accountID, "r-nope").get("reason", "")) == "not_found", "refund: unknown key not_found")
+
+	# gems consumidas → negado
+	var key2 : String = "r-buy2-%d" % tag
+	economy.EnqueueGrant(accountID, "gems", 550, key2)
+	economy.ProcessPendingGrants(50)
+	CheckEq(sql.GetGems(accountID), 550, "refund: second purchase credited")
+	Check(economy.AddGems(accountID, -100, "spend:test"), "refund: spend 100 gems")
+	Check(str(economy.RequestGemRefund(accountID, key2).get("reason", "")) == "gems_consumed", "refund: consumed -> denied")
+
+	# fora da janela → negado (linha sintética antiga; ledger append-only não "envelhece")
+	var oldkey : String = "r-old-%d" % tag
+	sql.ExecuteBindings("INSERT INTO ledger_transaction (account_id, char_id, kind, amount, balance_after, reason, created_at) VALUES (?, 0, 'gems', 550, 550, ?, ?);", [accountID, "grant:" + oldkey, SQLCommons.Timestamp() - 8 * 86400])
+	Check(str(economy.RequestGemRefund(accountID, oldkey).get("reason", "")) == "window_expired", "refund: older than 7d -> window_expired")

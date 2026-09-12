@@ -14,6 +14,8 @@ static var LastLeaderboard : Array = []
 # SOM-IDLE: estado do ladder de bosses + último resultado de desafio (janela Boss).
 static var LastBossState : Dictionary = {}
 static var LastBossResult : Dictionary = {}
+# SOM-IDLE (1d): último resultado de pedido de reembolso (CDC art.49).
+static var LastRefundResult : Dictionary = {}
 
 #
 func WarpPlayer(mapID : int, playerPos : Vector2, _peerID : int):
@@ -463,6 +465,13 @@ func AuthTokenResult(accountName : String, token : String, _peerID : int):
 func AccountErased(_peerID : int):
 	if Launcher.GUI and Launcher.GUI.notificationLabel:
 		Launcher.GUI.notificationLabel.AddNotification("[color=#ffcc66]Your account has been deleted and your personal data erased.[/color]")
+
+# SOM-IDLE (1d): resultado de um pedido de reembolso (CDC art.49).
+func RefundResult(result : Dictionary, _peerID : int):
+	LastRefundResult = result
+	var msg : String = "Refund approved (gems reversed; provider refund in progress)." if result.get("ok", false) else "Refund denied: %s" % str(result.get("reason", "?"))
+	if Launcher.GUI and Launcher.GUI.notificationLabel:
+		Launcher.GUI.notificationLabel.AddNotification("[color=#ffcc66]%s[/color]" % msg)
 
 func CharacterError(err : NetworkCommons.AuthError, _peerID : int):
 	if Launcher.GUI:

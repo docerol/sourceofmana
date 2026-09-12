@@ -47,6 +47,16 @@ func DeleteAccount(peerID : int = NetworkCommons.PeerAuthorityID) -> bool:
 func AccountErased(peerID : int = NetworkCommons.PeerOfflineID):
 	CallClient("AccountErased", [], peerID)
 
+# SOM-IDLE (1d) CDC art.49: pedido de reembolso de uma compra (chave de
+# idempotência recebida no ato da compra). Só com sessão ativa (dono da conta).
+@rpc("any_peer", "call_remote", "reliable", EChannel.CONNECT)
+func RequestRefund(idempotencyKey : String, peerID : int = NetworkCommons.PeerAuthorityID) -> bool:
+	return CallServer("RequestRefund", [idempotencyKey], peerID, NetworkCommons.DelayLogin)
+
+@rpc("authority", "call_remote", "reliable", EChannel.CONNECT)
+func RefundResult(result : Dictionary, peerID : int = NetworkCommons.PeerOfflineID):
+	CallClient("RefundResult", [result], peerID)
+
 @rpc("any_peer", "call_remote", "reliable", EChannel.CONNECT)
 func LoginWithPassword(accountName : String, password : String, rememberMe : bool, platform : int = NetworkCommons.Platform.UNKNOWN, peerID : int = NetworkCommons.PeerAuthorityID) -> bool:
 	return CallServer("LoginWithPassword", [accountName, password, rememberMe, platform], peerID, NetworkCommons.DelayLogin)
