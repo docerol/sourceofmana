@@ -288,6 +288,11 @@ func UpdateDeltas(delta : float):
 
 #
 func AddScript(npc : NpcAgent):
+	# SOM-IDLE idle-first: ponto único de disparo de script de NPC (clique no
+	# NPC, triggers de área do prologue). Em IdleMode nada disso abre — o
+	# jogador idle não é puxado para quests/diálogos.
+	if LauncherCommons.IdleMode:
+		return
 	if npc:
 		SetRelativeMode(false, Vector2.ZERO)
 		ownScript = npc.playerScriptPreset.new(npc, self) if npc.playerScriptPreset else NpcScript.new(npc, self)

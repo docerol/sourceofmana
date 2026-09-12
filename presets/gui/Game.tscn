@@ -205,13 +205,6 @@ texture = ExtResource("13_h6wc7")
 targetWindow = NodePath("../../../../../../../Windows/Floating/Skill")
 targetShortcut = &"ui_skill"
 
-[node name="Progress" parent="Overlay/VSections/Indicators/Menu/MenuContent/HBoxItems" unique_id=39792699 node_paths=PackedStringArray("targetWindow") instance=ExtResource("3_sl5jl")]
-visible = false
-layout_mode = 2
-texture = ExtResource("9_vtuwx")
-targetWindow = NodePath("../../../../../../../Windows/Floating/Progress")
-targetShortcut = &"ui_progress"
-
 [node name="Minimap" parent="Overlay/VSections/Indicators/Menu/MenuContent/HBoxItems" unique_id=713811777 node_paths=PackedStringArray("targetWindow") instance=ExtResource("3_sl5jl")]
 visible = false
 layout_mode = 2

@@ -23,3 +23,9 @@ const ServerMaxFPS : int				= 30
 static var IsTesting : bool				= not OS.has_feature("production")
 static var isMobile : bool				= OS.has_feature("android") or OS.has_feature("ios") or Util.IsMobile()
 static var isWeb : bool					= OS.has_feature("web")
+
+# SOM-IDLE idle-first: o beta é um idle auto battler — diálogos/quests de NPC
+# ficam desligados (tudo o que dispara script de NPC passa por PlayerAgent.
+# AddScript). O mundo de aventura segue no build como hub visual; ligar isto
+# devolve o MMORPG clássico para modo dev.
+static var IdleMode : bool				= true
