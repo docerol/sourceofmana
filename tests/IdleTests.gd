@@ -1582,6 +1582,58 @@ func SuiteSeasonAH(sql : SQLService) -> void:
 	sql.db.delete_rows("account", "username = 'idle_ah_seller'")
 	sql.db.delete_rows("account", "username = 'idle_ah_buyer'")
 
+# SOM-IDLE (3b): premiação automática de temporada (fecha + liquida).
+func SuiteSeasonPayout(sql : SQLService) -> void:
+	print("[suite] season auto-payout (3b)")
+	var economy : EconomyService = Launcher.Economy
+	var tag : int = SQLCommons.Timestamp()
+	var charA : int = CreateFixture(sql, "idle_payout_a_%d" % tag, "IdlePayA%d" % tag)
+	var charB : int = CreateFixture(sql, "idle_payout_b_%d" % tag, "IdlePayB%d" % tag)
+	if not Check(charA != 0 and charB != 0, "payout fixtures created"):
+		return
+	var acctA : int = sql.GetAccountIDForCharacter(charA)
+	var acctB : int = sql.GetAccountIDForCharacter(charB)
+	# garante topo determinístico do placar de power (snapshot lê power_score global)
+	sql.UpdateRowsRaw("character", "char_id = %d" % charA, {"power_score" = 100000})
+	sql.UpdateRowsRaw("character", "char_id = %d" % charB, {"power_score" = 99999})
+
+	CheckEq(economy.GetGems(acctA), 0, "payout: fresh wallet zero gems")
+	Check(str(economy.SettleSeasonPrizes(999999).get("reason", "")) == "not_found", "payout: unknown season")
+
+	var seasonID : int = economy.CreateSeason(1)
+	Check(seasonID > 0, "payout: season created (#%d)" % seasonID)
+	# ainda ativa → recusa liquidar
+	Check(not bool(economy.SettleSeasonPrizes(seasonID).get("ok", false)), "payout: refuses while active")
+	Check(str(economy.SettleSeasonPrizes(seasonID).get("reason", "")) == "not_closed", "payout: not_closed reason")
+
+	Check(economy.CloseSeason(seasonID), "payout: season closed")
+	var res : Dictionary = economy.SettleSeasonPrizes(seasonID)
+	Check(bool(res.get("ok", false)), "payout: settle ok")
+	Check(int(res.get("awarded", 0)) >= 2, "payout: at least top-2 paid")
+	CheckEq(economy.GetGems(acctA), economy.SeasonPrizeGems[0], "payout: #1 power gets top prize")
+	CheckEq(economy.GetGems(acctB), economy.SeasonPrizeGems[1], "payout: #2 power gets 2nd prize")
+	Check(not sql.QueryBindings("SELECT id FROM ledger_transaction WHERE account_id = ? AND reason = ?;", [acctA, "season_prize:%d:power:%d" % [seasonID, charA]]).is_empty(), "payout: prize ledger row")
+	Check(str(economy.SettleSeasonPrizes(seasonID).get("reason", "")) == "already_settled", "payout: idempotent (settled)")
+	CheckEq(int(economy.SettleSeasonPrizes(seasonID).get("awarded", 0)), 0, "payout: no double grant")
+
+	# ciclo automático: temporada vencida é fechada + liquidada sozinha (payout 0 já
+	# pago não re-concede; criamos uma nova vencida p/ exercitar o auto-close)
+	var s2 : int = economy.CreateSeason(1)
+	sql.ExecuteBindings("UPDATE season SET ends_at = ? WHERE season_id = ?;", [SQLCommons.Timestamp() - 10, s2])
+	var tick : Dictionary = economy.TickSeasonLifecycle()
+	Check(int(tick.get("closed", 0)) >= 1, "payout: lifecycle auto-closed expired season")
+	var s2status : Array = sql.QueryBindings("SELECT status FROM season WHERE season_id = ?;", [s2])
+	Check(str(s2status[0]["status"]) == "settled", "payout: expired season auto-settled")
+
+	# limpeza
+	sql.db.delete_rows("season_score", "season_id = %d" % seasonID)
+	sql.db.delete_rows("season_score", "season_id = %d" % s2)
+	sql.ExecuteBindings("DELETE FROM season WHERE season_id IN (%d, %d);", [seasonID, s2])
+	sql.db.delete_rows("character", "nickname = 'IdlePayA%d'" % tag)
+	sql.db.delete_rows("character", "nickname = 'IdlePayB%d'" % tag)
+	sql.db.delete_rows("account", "username = 'idle_payout_a_%d'" % tag)
+	sql.db.delete_rows("account", "username = 'idle_payout_b_%d'" % tag)
+
 # Auth hardening (SOM-IDLE A1): KDF, lockout, e-mail único, LGPD.
 func SuiteAuthHardening(sql : SQLService) -> void:
 	print("[suite] Auth hardening (A1)")

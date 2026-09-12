@@ -948,7 +948,7 @@ func PromoteMember(leaderAccount : int, targetAccount : int) -> bool:
 		return false
 	return Launcher.SQL.ExecuteBindings("UPDATE guild_member SET rank = 'officer' WHERE account_id = ?;", [targetAccount])
 
-# ------------------------------------------------------------------ E2: seasons (corridas power + spend; premiação manual/GM na v0)
+# ------------------------------------------------------------------ E2: seasons (corridas power + spend; premiação automática no ciclo de vida — fecha e liquida)
 
 func ActiveSeason() -> Dictionary:
 	var rows : Array[Dictionary] = Launcher.SQL.QueryBindings("SELECT season_id, starts_at, ends_at, rules_frozen, status FROM season WHERE status = 'active' ORDER BY season_id DESC LIMIT 1;", [])
@@ -996,6 +996,62 @@ func GetSeasonBoard(seasonID : int, kind : String, limit : int = 20) -> Array[Di
 	if kind != "power" and kind != "spend":
 		return []
 	return Launcher.SQL.QueryBindings("SELECT subject_id, value FROM season_score WHERE season_id = ? AND kind = ? ORDER BY value DESC LIMIT ?;", [seasonID, kind, limit])
+
+# SOM-IDLE (3b): premiação AUTOMÁTICA — substitui o payout manual/GM da v0.
+# Tabela de prêmios em gems por colocação (top-N) para cada corrida (power/spend).
+const SeasonPrizeGems : Array[int] = [3000, 1800, 1200, 700, 500, 400, 300, 300, 200, 200]
+
+# Rodado no job diário (e chamável a qualquer momento): fecha temporadas vencidas
+# e liquida as fechadas. Idempotente — uma temporada só paga uma vez.
+func TickSeasonLifecycle() -> Dictionary:
+	var closed : int = 0
+	var settled : int = 0
+	var now : int = SQLCommons.Timestamp()
+	for row : Dictionary in Launcher.SQL.QueryBindings("SELECT season_id FROM season WHERE status = 'active' AND ends_at <= ?;", [now]):
+		if CloseSeason(int(row["season_id"])):
+			closed += 1
+	for row : Dictionary in Launcher.SQL.QueryBindings("SELECT season_id FROM season WHERE status = 'closed';", []):
+		var res : Dictionary = SettleSeasonPrizes(int(row["season_id"]))
+		if bool(res.get("ok", false)):
+			settled += 1
+	return {"closed" = closed, "settled" = settled}
+
+# Liquida os prêmios de uma temporada fechada: congela o placar final, concede
+# gems aos top-N por corrida e marca 'settled'. Gems (não-casháveis) via AddGems
+# com reason 'season_prize:<id>:<kind>:<subject>' — a prova no ledger garante
+# idempotência por vencedor, mesmo se uma execução anterior falhou no meio.
+func SettleSeasonPrizes(seasonID : int) -> Dictionary:
+	var season : Array[Dictionary] = Launcher.SQL.QueryBindings("SELECT status FROM season WHERE season_id = ?;", [seasonID])
+	if season.is_empty():
+		return {"ok" = false, "reason" = "not_found", "awarded" = 0}
+	var status : String = str(season[0]["status"])
+	if status == "settled":
+		return {"ok" = true, "reason" = "already_settled", "awarded" = 0}
+	if status != "closed":
+		return {"ok" = false, "reason" = "not_closed", "awarded" = 0}
+
+	SnapshotSeasonPower(seasonID)
+	SnapshotSeasonSpend(seasonID)
+	var awarded : int = 0
+	for kind in ["power", "spend"]:
+		var board : Array[Dictionary] = GetSeasonBoard(seasonID, kind, SeasonPrizeGems.size())
+		for rank : int in board.size():
+			var prize : int = SeasonPrizeGems[rank]
+			if prize <= 0:
+				continue
+			var subject : int = int(board[rank]["subject_id"])
+			var accountID : int = _AccountIDForCharacterRaw(subject) if kind == "power" else subject
+			if accountID <= 0:
+				continue
+			var reason : String = "season_prize:%d:%s:%d" % [seasonID, kind, subject]
+			if not Launcher.SQL.QueryBindings("SELECT id FROM ledger_transaction WHERE account_id = ? AND reason = ?;", [accountID, reason]).is_empty():
+				continue
+			if AddGems(accountID, prize, reason):
+				awarded += 1
+	Launcher.SQL.ExecuteBindings("UPDATE season SET status = 'settled' WHERE season_id = ? AND status = 'closed';", [seasonID])
+	if awarded > 0:
+		Util.PrintLog("Economy", "Season %d settled automatically: %d prize grants" % [seasonID, awarded])
+	return {"ok" = true, "reason" = "settled", "awarded" = awarded}
 
 # ------------------------------------------------------------------ E2: auction house (escrow em lots, taxa flat queimada)
 
@@ -1149,6 +1205,10 @@ func RunReconcileJob() -> int:
 	var flagged : int = RunFraudScan()
 	if flagged > 0:
 		Util.PrintLog("Economy", "Fraud scan opened %d flags" % flagged)
+	# SOM-IDLE (3b): ciclo de vida de temporada (fecha vencidas + liquida prêmios).
+	var seasons : Dictionary = TickSeasonLifecycle()
+	if int(seasons.get("settled", 0)) > 0 or int(seasons.get("closed", 0)) > 0:
+		Util.PrintLog("Economy", "Season lifecycle: closed %d, settled %d" % [int(seasons.get("closed", 0)), int(seasons.get("settled", 0))])
 	return divergences
 
 # SOM-IDLE D3: heuristic fraud scan (roda no job diário; revisão é manual via
