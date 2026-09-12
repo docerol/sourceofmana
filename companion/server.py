@@ -34,7 +34,7 @@ import os
 import sqlite3
 import sys
 import time
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 KINDS = ("gems", "gold", "vip_days")
@@ -76,6 +76,33 @@ def load_catalog(path):
 
 class CatalogError(Exception):
     pass
+
+
+# (3c) hook de alerta/uptime opt-in: se SHAMBLETA_ALERT_WEBHOOK estiver setado
+# (ex.: healthchecks.io/Discord), melhor-esforço um POST JSON. Nunca bloqueia o
+# request (thread própria + timeout curto) nem levanta — alertas são side-channel.
+ALERT_URL = os.environ.get("SHAMBLETA_ALERT_WEBHOOK", "")
+
+
+def alert(message, level="warn"):
+    if not ALERT_URL:
+        return
+    import threading
+    from urllib.request import Request, urlopen
+
+    def _send():
+        try:
+            payload = json.dumps({"source": "shambleta-companion",
+                                  "level": level, "message": message,
+                                  "at": int(time.time())}).encode()
+            req = Request(ALERT_URL, data=payload,
+                          headers={"Content-Type": "application/json"})
+            urlopen(req, timeout=5).read()
+        except Exception:
+            pass  # alertas nunca derrubam o serviço
+
+    threading.Thread(target=_send, daemon=True).start()
+
 
 
 def resolve_grant(catalog, sku, claimed_amount=None):
@@ -316,6 +343,7 @@ class Handler(BaseHTTPRequestHandler):
             kind, amount = resolve_grant(
                 self.server.catalog, norm["sku"], norm.get("amount"))
         except CatalogError as e:
+            alert("webhook grant rejected (%s) sku=%r" % (str(e), norm.get("sku")))
             return self._send(400, {"error": str(e)})
         key = norm["idempotency_key"]
         if not key:
@@ -330,6 +358,7 @@ class Handler(BaseHTTPRequestHandler):
                 status = self.server.store.enqueue(
                     con, key, account_id, kind, amount, payload)
         except sqlite3.Error as e:
+            alert("webhook DB error: %s" % e, "error")
             return self._send(500, {"error": "db_error", "detail": str(e)})
         self._send(200, {"status": status})
 
@@ -376,7 +405,13 @@ def main():
     if not os.path.exists(args.db):
         sys.stderr.write("companion: database not found: %s\n" % args.db)
         return 2
-    server = HTTPServer(("127.0.0.1", args.port), Handler)
+    host = os.environ.get("SHAMBLETA_COMPANION_HOST", "127.0.0.1")
+    # (3c) servidor de produção: multi-thread (webhooks concorrentes não bloqueiam
+    # /health nem entre si). Cada request abre a própria conexão SQLite (WAL), então
+    # a troca HTTPServer→ThreadingHTTPServer não cruza conexões entre threads.
+    server = ThreadingHTTPServer((host, args.port), Handler)
+    server.daemon_threads = True   # não segura o processo em requests pendurados
+    server.request_queue_size = 128
     server.store = Store(args.db)
     server.secret = args.secret
     server.provider = args.provider
@@ -384,12 +419,14 @@ def main():
     server.catalog = catalog
     server.tolerance = args.tolerance
     server.allow_dev = bool(args.allow_dev)
-    print("companion: listening on 127.0.0.1:%d (db %s, provider %s, %d SKUs)"
-          % (args.port, args.db, args.provider, len(catalog)), flush=True)
+    print("companion: listening on %s:%d (db %s, provider %s, %d SKUs)"
+          % (host, args.port, args.db, args.provider, len(catalog)), flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
+    finally:
+        server.server_close()
     return 0
 
 
