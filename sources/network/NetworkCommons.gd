@@ -198,7 +198,22 @@ enum AuthError {
 	ERR_PASSWORD_MISMATCH,
 	ERR_PASSWORD_CHANGE_OK,
 	ERR_PASSWORD_CHANGE_WRONG,
+	# SOM-IDLE LGPD: cadastro exige aceite afirmativo dos termos.
+	ERR_CONSENT_REQUIRED,
 }
+
+# SOM-IDLE LGPD: status da conta para o direito ao esquecimento (art. 18).
+enum AccountStatus {
+	ACTIVE = 0,
+	DELETION_SCHEDULED = 1,
+	DELETED = 2,
+}
+
+# Versões dos textos legais que o cliente está exibindo/aceitando. bump a cada
+# revisão jurídica — força re-aceite dos ativos (handoff: sincronizar com o
+# conteúdo de data/db/agreement.json e a política de privacidade publicada).
+const AgreementTosVersion : String = "2026-09"
+const AgreementPrivacyVersion : String = "2026-09"
 
 static func CheckSize(entry : String, minSize : int, maxSize : int) -> bool:
 	var currentSize : int = entry.length()

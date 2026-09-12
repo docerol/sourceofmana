@@ -38,7 +38,7 @@ func ApplyMigration(migrationFile : String):
 	Query(migration)
 
 # Accounts
-func AddAccount(username : String, password : String, email : String) -> bool:
+func AddAccount(username : String, password : String, email : String, tosVersion : String = "", privacyVersion : String = "", consentIp : String = "") -> bool:
 	# SOM-IDLE A1: e-mail obrigatório e único (base do tier anti-RMT + recuperação).
 	if email.is_empty() or HasEmail(email):
 		return false
@@ -54,12 +54,93 @@ func AddAccount(username : String, password : String, email : String) -> bool:
 		"email_verified" : 0,
 		"failed_attempts" : 0,
 		"locked_until" : 0,
-		"created_timestamp" : SQLCommons.Timestamp()
+		"created_timestamp" : SQLCommons.Timestamp(),
+		# SOM-IDLE LGPD: aceite afirmativo dos textos (versão + quando + de onde).
+		"consent_tos_version" : tosVersion,
+		"consent_privacy_version" : privacyVersion,
+		"consent_timestamp" : SQLCommons.Timestamp() if not tosVersion.is_empty() else 0,
+		"consent_ip" : consentIp,
+		"status" : NetworkCommons.AccountStatus.ACTIVE,
+		"purged_at" : 0
 	}
 	return db.insert_row("account", accountData)
 
+func IsConsentAccepted(accountID : int) -> bool:
+	var rows : Array[Dictionary] = QueryBindings("SELECT consent_tos_version, consent_privacy_version FROM account WHERE account_id = ?;", [accountID])
+	if rows.is_empty():
+		return false
+	return str(rows[0].get("consent_tos_version", "")) != "" and str(rows[0].get("consent_privacy_version", "")) != ""
+
 func RemoveAccount(accountID : int) -> bool:
 	return db.delete_rows("account", "account_id = %d" % accountID)
+
+func GetCharacterIDsForAccount(accountID : int) -> Array:
+	var ids : Array = []
+	for row : Dictionary in QueryBindings("SELECT char_id FROM character WHERE account_id = ?;", [accountID]):
+		ids.append(int(row["char_id"]))
+	return ids
+
+# SOM-IDLE LGPD art.18 (direito ao esquecimento): anonimiza a conta e apaga os
+# dados pessoais/laterais, mas PRESERVA account_id e o ledger financeiro +
+# grant_queue + ban (retenção fiscal e prova de enforcement — o ledger é
+# append-only por trigger de qualquer forma). Idempotente: uma conta já
+# anonimizada retorna false.
+func EraseAccount(accountID : int) -> bool:
+	var statusRows : Array[Dictionary] = QueryBindings("SELECT status FROM account WHERE account_id = ?;", [accountID])
+	if statusRows.is_empty() or int(statusRows[0].get("status", NetworkCommons.AccountStatus.ACTIVE)) == NetworkCommons.AccountStatus.DELETED:
+		return false
+
+	var charIDs : Array = GetCharacterIDsForAccount(accountID)
+	var guildIDs : Array = []
+	for row : Dictionary in QueryBindings("SELECT guild_id FROM guild WHERE leader_account = ?;", [accountID]):
+		guildIDs.append(int(row["guild_id"]))
+	# listas de ids (ints) — embutidas com segurança; "0" garante IN (...) válido
+	var charList : String = "0" if charIDs.is_empty() else ",".join(charIDs.map(func(x): return str(int(x))))
+	var guildList : String = "0" if guildIDs.is_empty() else ",".join(guildIDs.map(func(x): return str(int(x))))
+	var anonUser : String = "deleted_%d" % accountID
+	var anonPass : String = Hasher.HashPasswordV1(Hasher.GenerateSalt(24), Hasher.GenerateSalt(16))
+	var now : int = SQLCommons.Timestamp()
+
+	return Transaction(func() -> bool:
+		# 1) dados por personagem (antes de remover as linhas de character)
+		for sql in [
+			"DELETE FROM item WHERE char_id IN (%s);",
+			"DELETE FROM item_instance WHERE char_id IN (%s);",
+			"DELETE FROM stat WHERE char_id IN (%s);",
+			"DELETE FROM attribute WHERE char_id IN (%s);",
+			"DELETE FROM skill WHERE char_id IN (%s);",
+			"DELETE FROM quest WHERE char_id IN (%s);",
+			"DELETE FROM equipment WHERE char_id IN (%s);",
+			"DELETE FROM bestiary WHERE char_id IN (%s);",
+			"DELETE FROM chest_instance WHERE char_id IN (%s);",
+			"DELETE FROM auction_listing WHERE seller_char IN (%s);",
+		]:
+			db.query_with_bindings(sql % charList, [])
+		db.query_with_bindings("DELETE FROM character WHERE account_id = ?;", [accountID])
+
+		# 2) dados por conta (auth, telemetria, preferências, wallet, fraude, AH)
+		for accountSql in [
+			"DELETE FROM auth_token WHERE account_id = ?;",
+			"DELETE FROM telemetry_event WHERE account_id = ?;",
+			"DELETE FROM formation WHERE account_id = ?;",
+			"DELETE FROM wallet WHERE account_id = ?;",
+			"DELETE FROM fraud_flag WHERE account_id = ?;",
+			"DELETE FROM auction_listing WHERE seller_account = ?;",
+		]:
+			db.query_with_bindings(accountSql, [accountID])
+
+		# 3) guild: sai da atual; dissolve as que lidera (FK off → limpa tudo)
+		db.query_with_bindings("DELETE FROM guild_member WHERE account_id = ?;", [accountID])
+		db.query_with_bindings("DELETE FROM guild_vault WHERE guild_id IN (%s);" % guildList, [])
+		db.query_with_bindings("DELETE FROM guild_vault_log WHERE guild_id IN (%s);" % guildList, [])
+		db.query_with_bindings("DELETE FROM guild_member WHERE guild_id IN (%s);" % guildList, [])
+		db.query_with_bindings("DELETE FROM guild WHERE leader_account = ?;", [accountID])
+
+		# 4) anonimiza a conta (mantém account_id p/ integridade do ledger)
+		db.query_with_bindings(
+			"UPDATE account SET username = ?, email = '', password = ?, password_salt = '', permission = ?, status = ?, purged_at = ?, consent_ip = '', consent_tos_version = '', consent_privacy_version = '' WHERE account_id = ?;",
+			[anonUser, anonPass, ActorCommons.Permission.NONE, NetworkCommons.AccountStatus.DELETED, now, accountID])
+		return true)
 
 func HasAccount(username : String) -> bool:
 	return not QueryBindings("SELECT account_id FROM account WHERE username = ?;", [username]).is_empty()

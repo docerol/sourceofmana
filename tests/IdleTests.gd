@@ -1661,3 +1661,53 @@ func SuiteOpsA2(sql : SQLService) -> void:
 
 	DirAccess.remove_absolute(snapPath)
 	DirAccess.remove_absolute(offsite)
+
+# ------------------------------------------------------------------ LGPD
+func SuiteLGPD(sql : SQLService):
+	print("[suite] lgpd consent + right-to-erasure")
+	var pw : String = "TestPass123"
+	var acct : String = "idle_lgpd_user"
+	var nick : String = "IdleLgpdChar"
+	sql.db.delete_rows("character", "nickname = '%s'" % nick)
+	sql.db.delete_rows("account", "username = '%s'" % acct)
+
+	# (a) consentimento afirmativo persistido (versão + ts + ip)
+	Check(sql.AddAccount(acct, pw, acct + "@test.local", NetworkCommons.AgreementTosVersion, NetworkCommons.AgreementPrivacyVersion, "203.0.113.7"), "lgpd: account created with consent")
+	var accountID : int = sql.GetAccountID(acct)
+	Check(accountID != NetworkCommons.PeerUnknownID, "lgpd: account id resolves")
+	Check(sql.IsConsentAccepted(accountID), "lgpd: consent accepted")
+	var crow : Array = sql.QueryBindings("SELECT consent_timestamp, consent_ip, status FROM account WHERE account_id = ?;", [accountID])
+	Check(int(crow[0].get("consent_timestamp", 0)) > 0, "lgpd: consent timestamp stored")
+	Check(str(crow[0].get("consent_ip", "")) == "203.0.113.7", "lgpd: consent ip stored")
+	CheckEq(int(crow[0].get("status", -1)), NetworkCommons.AccountStatus.ACTIVE, "lgpd: initial status ACTIVE")
+
+	# sem aceite => não considerado aceito (SQL guarda vazio; gate é no Server)
+	var noAcct : String = "idle_lgpd_noconsent"
+	sql.db.delete_rows("account", "username = '%s'" % noAcct)
+	Check(sql.AddAccount(noAcct, pw, noAcct + "@test.local"), "lgpd: no-consent account row still creatable")
+	Check(not sql.IsConsentAccepted(sql.GetAccountID(noAcct)), "lgpd: no-consent NOT accepted")
+
+	# monta personagem + wallet + ledger (financeiro deve sobreviver à deleção)
+	Check(sql.AddCharacter(accountID, nick, ActorCommons.DefaultStats, ActorCommons.DefaultTraits, ActorCommons.DefaultAttributes), "lgpd: character created")
+	var charID : int = sql.GetCharacterID(accountID, nick)
+	Check(charID != NetworkCommons.PeerUnknownID, "lgpd: character id resolves")
+	sql.ExecuteBindings("INSERT INTO wallet (account_id, gems, updated_at) VALUES (?, 500, 1);", [accountID])
+	sql.ExecuteBindings("INSERT INTO ledger_transaction (account_id, char_id, kind, amount, balance_after, reason, created_at) VALUES (?, ?, 'gem', 500, 500, 'grant:test', 1);", [accountID, charID])
+	var ledgerBefore : int = int(sql.QueryBindings("SELECT COUNT(*) AS c FROM ledger_transaction WHERE account_id = ?;", [accountID])[0]["c"])
+	CheckEq(ledgerBefore, 1, "lgpd: one ledger row seeded")
+
+	# (b) direito ao esquecimento — anonimiza conta, apaga pessoais, preserva financeiro
+	Check(sql.EraseAccount(accountID), "lgpd: erase returns true")
+	var erow : Array = sql.QueryBindings("SELECT username, email, status, consent_ip, password_salt FROM account WHERE account_id = ?;", [accountID])
+	Check(not erow.is_empty(), "lgpd: account row KEPT (pseudonymous id for ledger)")
+	Check(str(erow[0].get("username", "")) == "deleted_%d" % accountID, "lgpd: username tombstoned")
+	Check(str(erow[0].get("email", "")) == "", "lgpd: e-mail erased")
+	Check(str(erow[0].get("consent_ip", "")) == "", "lgpd: consent ip erased")
+	CheckEq(int(erow[0].get("status", -1)), NetworkCommons.AccountStatus.DELETED, "lgpd: status DELETED")
+	Check(str(erow[0].get("password_salt", "")) == "", "lgpd: password salt wiped")
+	Check(not sql.IsConsentAccepted(accountID), "lgpd: consent blanked after erase")
+	CheckEq(int(sql.QueryBindings("SELECT COUNT(*) AS c FROM character WHERE account_id = ?;", [accountID])[0]["c"]), 0, "lgpd: characters purged")
+	CheckEq(int(sql.QueryBindings("SELECT COUNT(*) AS c FROM wallet WHERE account_id = ?;", [accountID])[0]["c"]), 0, "lgpd: wallet purged")
+	CheckEq(int(sql.QueryBindings("SELECT COUNT(*) AS c FROM ledger_transaction WHERE account_id = ?;", [accountID])[0]["c"]), ledgerBefore, "lgpd: LEDGER preserved (fiscal retention)")
+	Check(sql.ValidateAuthPassword(acct, pw) == null, "lgpd: old login refused after erase")
+	Check(not sql.EraseAccount(accountID), "lgpd: erase is idempotent (already deleted)")

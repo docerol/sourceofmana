@@ -34,8 +34,18 @@ enum EChannel
 
 # Auth
 @rpc("any_peer", "call_remote", "reliable", EChannel.CONNECT)
-func CreateAccount(accountName : String, password : String, email : String, rememberMe : bool, platform : int = NetworkCommons.Platform.UNKNOWN, peerID : int = NetworkCommons.PeerAuthorityID) -> bool:
-	return CallServer("CreateAccount", [accountName, password, email, rememberMe, platform], peerID, NetworkCommons.DelayLogin)
+func CreateAccount(accountName : String, password : String, email : String, rememberMe : bool, consentAccepted : bool, platform : int = NetworkCommons.Platform.UNKNOWN, peerID : int = NetworkCommons.PeerAuthorityID) -> bool:
+	return CallServer("CreateAccount", [accountName, password, email, rememberMe, platform, consentAccepted], peerID, NetworkCommons.DelayLogin)
+
+# SOM-IDLE LGPD: pedido de exclusão de conta (direito ao esquecimento) — só com
+# sessão ativa. Server anonimiza os dados e derruba a conexão.
+@rpc("any_peer", "call_remote", "reliable", EChannel.CONNECT)
+func DeleteAccount(peerID : int = NetworkCommons.PeerAuthorityID) -> bool:
+	return CallServer("DeleteAccount", [], peerID, NetworkCommons.DelayLogin)
+
+@rpc("authority", "call_remote", "reliable", EChannel.CONNECT)
+func AccountErased(peerID : int = NetworkCommons.PeerOfflineID):
+	CallClient("AccountErased", [], peerID)
 
 @rpc("any_peer", "call_remote", "reliable", EChannel.CONNECT)
 func LoginWithPassword(accountName : String, password : String, rememberMe : bool, platform : int = NetworkCommons.Platform.UNKNOWN, peerID : int = NetworkCommons.PeerAuthorityID) -> bool:

@@ -458,6 +458,12 @@ func AuthTokenResult(accountName : String, token : String, _peerID : int):
 	if Launcher.GUI:
 		Launcher.GUI.loginPanel.SaveToken(accountName, token)
 
+# SOM-IDLE LGPD: o servidor confirmou a exclusão/anonimização da conta; avisa o
+# jogador e a queda de sessão (DisconnectAccount) leva ao LOGIN_SCREEN.
+func AccountErased(_peerID : int):
+	if Launcher.GUI and Launcher.GUI.notificationLabel:
+		Launcher.GUI.notificationLabel.AddNotification("[color=#ffcc66]Your account has been deleted and your personal data erased.[/color]")
+
 func CharacterError(err : NetworkCommons.AuthError, _peerID : int):
 	if Launcher.GUI:
 		Launcher.GUI.characterPanel.FillWarningLabel(err)

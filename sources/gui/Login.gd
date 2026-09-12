@@ -18,8 +18,13 @@ extends Control
 @onready var separator : HSeparator			= $HBoxContainer/Panel/Margin/VBoxContainer/HSeparator2
 @onready var news : Scrollable				= $HBoxContainer/Panel/Margin/VBoxContainer/News
 @onready var agreement : Scrollable			= $HBoxContainer/Panel/Margin/VBoxContainer/Agreement
+@onready var loginContainer : Control			= $HBoxContainer/Panel/Margin/VBoxContainer/LoginContainer
 
 enum RecoveryState { NONE, REQUEST_EMAIL, ENTER_CODE }
+
+# SOM-IDLE LGPD: aceite afirmativo (scroll do termo não é consentimento — exige
+# checkbox). Criado em runtime p/ não editar o .tscn; visível só no cadastro.
+var consentCheckBox : CheckBox				= null
 
 var nameText : String						= ""
 var savedToken : String						= ""
@@ -28,6 +33,15 @@ var fillingFields : bool					= false
 var isAccountCreatorEnabled : bool			= false
 var recoveryState : RecoveryState			= RecoveryState.NONE
 var pendingFocusControl : Control			= null
+
+#
+func _ready():
+	consentCheckBox = CheckBox.new()
+	consentCheckBox.text = "I have read and accept the Terms of Use and Privacy Policy"
+	consentCheckBox.visible = false
+	loginContainer.add_child(consentCheckBox)
+	# logo abaixo do campo de e-mail, acima da linha de "Remember me"
+	loginContainer.move_child(consentCheckBox, emailControl.get_index() + 1)
 
 #
 func FillWarningLabel(err : NetworkCommons.AuthError):
@@ -79,6 +93,9 @@ func FillWarningLabel(err : NetworkCommons.AuthError):
 		NetworkCommons.AuthError.ERR_EMAIL_VALID:
 			warn = "Email is incorrect, please us a normal email format."
 			RequestFocus(emailTextControl)
+		NetworkCommons.AuthError.ERR_CONSENT_REQUIRED:
+			warn = "You must read and accept the Terms of Use and Privacy Policy to register."
+			RequestFocus(consentCheckBox)
 		NetworkCommons.AuthError.ERR_RESET_UNAVAILABLE:
 			warn = "Password reset is not available on this server."
 			SetRecoveryState(RecoveryState.NONE)
@@ -116,6 +133,9 @@ func ApplyFocus():
 func SetRecoveryState(state : RecoveryState):
 	recoveryState = state
 	isAccountCreatorEnabled = false
+	if consentCheckBox:
+		consentCheckBox.visible = false
+		consentCheckBox.button_pressed = false
 
 	match recoveryState:
 		RecoveryState.NONE:
@@ -171,6 +191,9 @@ func EnableAccountCreator(enable : bool):
 	confirmPasswordControl.set_visible(isAccountCreatorEnabled)
 	emailControl.set_visible(isAccountCreatorEnabled)
 	agreement.set_visible(isAccountCreatorEnabled)
+	consentCheckBox.visible = isAccountCreatorEnabled
+	if not isAccountCreatorEnabled:
+		consentCheckBox.button_pressed = false
 	resetCodeControl.set_visible(false)
 
 	nameControl.set_visible(true)
@@ -291,9 +314,12 @@ func CreateAccount():
 			authError = NetworkCommons.AuthError.ERR_PASSWORD_MISMATCH
 	if authError == NetworkCommons.AuthError.ERR_OK:
 		authError = NetworkCommons.CheckEmailInformation(emailText)
+	# SOM-IDLE LGPD: sem o aceite afirmativo não cria a conta.
+	if authError == NetworkCommons.AuthError.ERR_OK and not consentCheckBox.button_pressed:
+		authError = NetworkCommons.AuthError.ERR_CONSENT_REQUIRED
 
 	if authError == NetworkCommons.AuthError.ERR_OK:
-		if Network.CreateAccount(nameText, passwordText, emailText, rememberMeCheckBox.button_pressed, NetworkCommons.GetPlatform()):
+		if Network.CreateAccount(nameText, passwordText, emailText, rememberMeCheckBox.button_pressed, true, NetworkCommons.GetPlatform()):
 			FSM.EnterState(FSM.States.LOGIN_PROGRESS)
 	else:
 		FillWarningLabel(authError)

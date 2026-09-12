@@ -2,7 +2,7 @@ extends NetInterface
 class_name NetServer
 
 # Auth
-func CreateAccount(accountName : String, password : String, email : String, rememberMe : bool, platform : int, peerID : int):
+func CreateAccount(accountName : String, password : String, email : String, rememberMe : bool, platform : int, consentAccepted : bool, peerID : int):
 	var err : NetworkCommons.AuthError = NetworkCommons.AuthError.ERR_OK
 	var peer : Peers.Peer = Peers.GetPeer(peerID)
 	if not peer:
@@ -11,10 +11,13 @@ func CreateAccount(accountName : String, password : String, email : String, reme
 		err = NetworkCommons.CheckAuthInformation(accountName, password)
 		if err == NetworkCommons.AuthError.ERR_OK:
 			err = NetworkCommons.CheckEmailInformation(email)
+		# SOM-IDLE LGPD: aceite afirmativo obrigatório antes de criar a conta.
+		if err == NetworkCommons.AuthError.ERR_OK and not consentAccepted:
+			err = NetworkCommons.AuthError.ERR_CONSENT_REQUIRED
 		if err == NetworkCommons.AuthError.ERR_OK:
 			if Launcher.SQL.HasAccount(accountName) or Launcher.SQL.HasEmail(email):
 				err = NetworkCommons.AuthError.ERR_NAME_AVAILABLE
-			elif not Launcher.SQL.AddAccount(accountName, password, email):
+			elif not Launcher.SQL.AddAccount(accountName, password, email, NetworkCommons.AgreementTosVersion, NetworkCommons.AgreementPrivacyVersion, Peers.GetPeerIP(peerID)):
 				err = NetworkCommons.AuthError.ERR_NAME_AVAILABLE
 			else:
 				Network.accounts_list_update.emit()
@@ -22,6 +25,22 @@ func CreateAccount(accountName : String, password : String, email : String, reme
 				if accountData:
 					err = Peers.FinalizeLogin(peer, accountName, accountData, platform, rememberMe)
 	Network.AuthError(err, peerID)
+
+# SOM-IDLE LGPD art.18: o próprio jogador (logado) exercita o direito ao
+# esquecimento. Anonimiza a conta no servidor (mantendo o ledger financeiro) e
+# derruba a sessão. Precisa de sessão autenticada — nunca por conta deslogada.
+func DeleteAccount(peerID : int):
+	var peer : Peers.Peer = Peers.GetPeer(peerID)
+	if not peer or peer.accountID == NetworkCommons.PeerUnknownID:
+		Network.AuthError(NetworkCommons.AuthError.ERR_NO_PEER_DATA, peerID)
+		return
+	var accountID : int = peer.accountID
+	if not Launcher.SQL.EraseAccount(accountID):
+		Network.AuthError(NetworkCommons.AuthError.ERR_AUTH, peerID)
+		return
+	Util.PrintLog("Auth", "LGPD: account %d erased (data anonymized, ledger retained)" % accountID)
+	Network.AccountErased(peerID)
+	DisconnectAccount(peerID)
 
 func LoginWithPassword(accountName : String, password : String, rememberMe : bool, platform : int, peerID : int):
 	var err : NetworkCommons.AuthError = NetworkCommons.AuthError.ERR_OK

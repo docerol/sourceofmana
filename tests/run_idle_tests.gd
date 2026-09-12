@@ -112,6 +112,7 @@ func _run_tests():
 
 		# SOM-IDLE: A1 auth hardening + A2 ops hardening
 		suites.SuiteAuthHardening(sql)
+		suites.SuiteLGPD(sql)
 		suites.SuiteOpsA2(sql)
 
 		# §7.4 deterministic live farm sim (zone 1) — after the DB suites so the

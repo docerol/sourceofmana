@@ -7,6 +7,7 @@ const userSection : String						= "User"
 const creditsJson : JSON						= preload("res://data/db/credits.json")
 
 @onready var creditsContainer : VBoxContainer	= $Layout/Margin/TabBar/Credits/Margin/VBox
+@onready var accountVBox : VBoxContainer		= $Layout/Margin/TabBar/Account/AccountVBox
 
 @onready var renderAccessors : Dictionary = {
 	"Render-MinWindowSize": [init_minwinsize, set_minwinsize, apply_minwinsize, null],
@@ -384,6 +385,23 @@ func _ready():
 		renderAccessors["Render-Fullscreen"][ACC_TYPE.LABEL].set_visible(false)
 
 	renderAccessors["Network-Local"][ACC_TYPE.LABEL].set_visible(OS.is_debug_build())
+
+	# SOM-IDLE LGPD art.18: o titular exercita o direito ao esquecimento logado.
+	# Botão criado em runtime (não edita o .tscn); confirmação antes de enviar.
+	if accountVBox:
+		var deleteButton : Button = Button.new()
+		deleteButton.name = "DeleteAccountButton"
+		deleteButton.text = "Delete my account (erase personal data)"
+		deleteButton.pressed.connect(_on_delete_account_pressed)
+		accountVBox.add_child(deleteButton)
+
+func _on_delete_account_pressed():
+	UICommons.MessageBox(
+		"This permanently deletes your account and erases your personal data (LGPD art. 18). Your characters and inventory are removed; financial ledger records are retained as required by law. This action cannot be undone.",
+		Callable(self, "_confirm_delete_account"), "Delete forever")
+
+func _confirm_delete_account():
+	Network.DeleteAccount()
 
 # Conf accessors
 func RefreshSettings(apply : bool):
