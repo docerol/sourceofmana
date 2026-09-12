@@ -110,6 +110,7 @@ func _run_tests():
 			suites.SuiteGuilds(sql)
 			suites.SuiteSeasonAH(sql)
 			suites.SuiteSeasonPayout(sql)
+			suites.SuiteI18n(sql)
 
 		# SOM-IDLE: A1 auth hardening + A2 ops hardening
 		suites.SuiteAuthHardening(sql)

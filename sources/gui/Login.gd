@@ -85,7 +85,7 @@ func FillWarningLabel(err : NetworkCommons.AuthError):
 			warn = "Email is incorrect, please us a normal email format."
 			RequestFocus(emailTextControl)
 		NetworkCommons.AuthError.ERR_CONSENT_REQUIRED:
-			warn = "You must read and accept the Terms of Use and Privacy Policy to register."
+			warn = tr("You must read and accept the Terms of Use and Privacy Policy to register.")
 			RequestFocus(consentCheckBox)
 		NetworkCommons.AuthError.ERR_RESET_UNAVAILABLE:
 			warn = "Password reset is not available on this server."
@@ -222,19 +222,19 @@ func EnableButtons(state : bool):
 		Launcher.GUI.buttonBoxes.ClearAll()
 		if state:
 			if recoveryState == RecoveryState.REQUEST_EMAIL:
-				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.PRIMARY, "Send Code", RequestReset)
-				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.CANCEL, "Cancel", SetRecoveryState.bind(RecoveryState.NONE))
+				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.PRIMARY, tr("Send Code"), RequestReset)
+				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.CANCEL, tr("Cancel"), SetRecoveryState.bind(RecoveryState.NONE))
 			elif recoveryState == RecoveryState.ENTER_CODE:
-				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.PRIMARY, "Reset Password", ConfirmReset)
-				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.CANCEL, "Cancel", SetRecoveryState.bind(RecoveryState.NONE))
+				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.PRIMARY, tr("Reset Password"), ConfirmReset)
+				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.CANCEL, tr("Cancel"), SetRecoveryState.bind(RecoveryState.NONE))
 			elif isAccountCreatorEnabled:
-				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.PRIMARY, "Create", CreateAccount)
-				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.CANCEL, "Cancel", EnableAccountCreator.bind(false))
+				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.PRIMARY, tr("Create"), CreateAccount)
+				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.CANCEL, tr("Cancel"), EnableAccountCreator.bind(false))
 			else:
 				# SOM-IDLE: 100% online (browser) — sem toggle offline.
-				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.PRIMARY, "Connect", Connect)
-				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.SECONDARY, "Create Account", EnableAccountCreator.bind(true))
-				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.CANCEL, "Forgot Password", SetRecoveryState.bind(RecoveryState.REQUEST_EMAIL))
+				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.PRIMARY, tr("Connect"), Connect)
+				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.SECONDARY, tr("Create Account"), EnableAccountCreator.bind(true))
+				Launcher.GUI.buttonBoxes.Bind(UICommons.ButtonBox.CANCEL, tr("Forgot Password"), SetRecoveryState.bind(RecoveryState.REQUEST_EMAIL))
 
 func RefreshOnce():
 	EnableAccountCreator(isAccountCreatorEnabled)
@@ -386,7 +386,7 @@ func _on_remember_me_toggled(toggled_on : bool):
 func _ready():
 	# SOM-IDLE LGPD: checkbox de aceite (scroll do termo não é consentimento).
 	consentCheckBox = CheckBox.new()
-	consentCheckBox.text = "I have read and accept the Terms of Use and Privacy Policy"
+	consentCheckBox.text = tr("I have read and accept the Terms of Use and Privacy Policy")
 	consentCheckBox.visible = false
 	loginContainer.add_child(consentCheckBox)
 	# logo abaixo do campo de e-mail, acima da linha de "Remember me"

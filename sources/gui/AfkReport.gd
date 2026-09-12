@@ -18,16 +18,16 @@ func _ready():
 func ShowReport(report : Dictionary):
 	if report.is_empty():
 		return
-	hoursLabel.text = "Away: %.1fh" % float(report.get("hours", 0.0))
-	xpLabel.text = "+%s XP" % Util.FormatNumber(int(report.get("xp_earned", 0)))
-	goldLabel.text = "+%s gold" % Util.FormatNumber(int(report.get("gold_earned", 0)))
+	hoursLabel.text = tr("Away: %.1fh") % float(report.get("hours", 0.0))
+	xpLabel.text = tr("+%s XP") % Util.FormatNumber(int(report.get("xp_earned", 0)))
+	goldLabel.text = tr("+%s gold") % Util.FormatNumber(int(report.get("gold_earned", 0)))
 	var drops : Dictionary = report.get("drops", {})
 	var dropTotal : int = 0
 	for itemHash in drops:
 		dropTotal += int(drops[itemHash])
-	dropsLabel.text = "Drops: %d" % dropTotal
-	chestsLabel.text = "Chests: %d" % int(report.get("chests", 0))
-	effLabel.text = "Efficiency: %d%%" % int(float(report.get("efficiency", 1.0)) * 100.0)
+	dropsLabel.text = tr("Drops: %d") % dropTotal
+	chestsLabel.text = tr("Chests: %d") % int(report.get("chests", 0))
+	effLabel.text = tr("Efficiency: %d%%") % int(float(report.get("efficiency", 1.0)) * 100.0)
 
 func _on_collect_pressed():
 	Network.ClaimOfflineSettle()

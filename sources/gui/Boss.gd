@@ -33,7 +33,7 @@ func ShowState(state : Dictionary):
 	var keys : int = int(state.get("keys", 0))
 	var beaten : int = int(state.get("beaten", 0))
 	var count : int = int(state.get("count", 0))
-	keysLabel.text = "Boss keys: %d    •    Bosses defeated: %d/%d" % [keys, beaten, count]
+	keysLabel.text = tr("Boss keys: %d    •    Bosses defeated: %d/%d") % [keys, beaten, count]
 	for child in bossList.get_children():
 		child.queue_free()
 	for boss in state.get("bosses", []):
@@ -49,9 +49,9 @@ func ShowState(state : Dictionary):
 			btn.pressed.connect(_on_challenge_pressed)
 		bossList.add_child(btn)
 	if count > 0 and beaten >= count:
-		hintLabel.text = "Ladder complete — you defeated every boss!"
+		hintLabel.text = tr("Ladder complete — you defeated every boss!")
 	elif keys < 1:
-		hintLabel.text = "No boss keys. Farm mobs drop them (~%d%% per kill)." % int(round(float(BossService.KeyDropPPM) / 10000.0))
+		hintLabel.text = tr("No boss keys. Farm mobs drop them (~%d%% per kill).") % int(round(float(BossService.KeyDropPPM) / 10000.0))
 	else:
 		hintLabel.text = "Challenge the highlighted boss. It matches your level — gear decides."
 

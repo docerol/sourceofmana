@@ -464,12 +464,12 @@ func AuthTokenResult(accountName : String, token : String, _peerID : int):
 # jogador e a queda de sessão (DisconnectAccount) leva ao LOGIN_SCREEN.
 func AccountErased(_peerID : int):
 	if Launcher.GUI and Launcher.GUI.notificationLabel:
-		Launcher.GUI.notificationLabel.AddNotification("[color=#ffcc66]Your account has been deleted and your personal data erased.[/color]")
+		Launcher.GUI.notificationLabel.AddNotification("[color=#ffcc66]%s[/color]" % tr("Your account has been deleted and your personal data erased."))
 
 # SOM-IDLE (1d): resultado de um pedido de reembolso (CDC art.49).
 func RefundResult(result : Dictionary, _peerID : int):
 	LastRefundResult = result
-	var msg : String = "Refund approved (gems reversed; provider refund in progress)." if result.get("ok", false) else "Refund denied: %s" % str(result.get("reason", "?"))
+	var msg : String = tr("Refund approved (gems reversed; provider refund in progress).") if result.get("ok", false) else tr("Refund denied: %s") % str(result.get("reason", "?"))
 	if Launcher.GUI and Launcher.GUI.notificationLabel:
 		Launcher.GUI.notificationLabel.AddNotification("[color=#ffcc66]%s[/color]" % msg)
 

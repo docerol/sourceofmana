@@ -1634,6 +1634,20 @@ func SuiteSeasonPayout(sql : SQLService) -> void:
 	sql.db.delete_rows("account", "username = 'idle_payout_a_%d'" % tag)
 	sql.db.delete_rows("account", "username = 'idle_payout_b_%d'" % tag)
 
+# SOM-IDLE (3a): i18n pt-BR scaffold — valida o pipeline de tradução registrado.
+func SuiteI18n(_sql : SQLService) -> void:
+	print("[suite] i18n pt-BR scaffold")
+	var key : String = "Delete my account (erase personal data)"
+	TranslationServer.set_locale("en")
+	Check(TranslationServer.translate(key) == key, "i18n: en resolves to source")
+	TranslationServer.set_locale("pt_BR")
+	Check(TranslationServer.translate(key) == "Excluir minha conta (apagar meus dados pessoais)", "i18n: pt_BR translates delete-account label")
+	Check(TranslationServer.translate("Create Account") == "Criar conta", "i18n: pt_BR create account")
+	Check(TranslationServer.translate("Refund denied: %s") == "Reembolso recusado: %s", "i18n: pt_BR keeps format placeholder")
+	Check(str(TranslationServer.translate("Boss keys: %d    •    Bosses defeated: %d/%d") % [1, 2, 4]).begins_with("Chaves"), "i18n: pt_BR formats correctly")
+	TranslationServer.set_locale("en")
+	Check(TranslationServer.translate("Create Account") == "Create Account", "i18n: locale restored to en")
+
 # Auth hardening (SOM-IDLE A1): KDF, lockout, e-mail único, LGPD.
 func SuiteAuthHardening(sql : SQLService) -> void:
 	print("[suite] Auth hardening (A1)")

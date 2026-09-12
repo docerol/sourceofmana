@@ -391,7 +391,7 @@ func _ready():
 	if accountVBox:
 		var deleteButton : Button = Button.new()
 		deleteButton.name = "DeleteAccountButton"
-		deleteButton.text = "Delete my account (erase personal data)"
+		deleteButton.text = tr("Delete my account (erase personal data)")
 		deleteButton.pressed.connect(_on_delete_account_pressed)
 		accountVBox.add_child(deleteButton)
 

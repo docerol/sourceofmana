@@ -93,6 +93,11 @@ texture={
 "svg/scale": 1.0
 }
 
+[internationalization]
+
+locale/translations=PackedStringArray("res://data/i18n/ui.en.translation", "res://data/i18n/ui.pt_BR.translation")
+locale/fallback="en"
+
 [input]
 
 ui_accept={
