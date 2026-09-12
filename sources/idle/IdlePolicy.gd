@@ -240,7 +240,15 @@ func _tickCombat(delta : float):
 	var dist : float = agent.position.distance_to(target.position)
 
 	if dist > range:
-		agent.WalkToward(target.position)
+		# SOM-IDLE: nunca cancele um cast em progresso para perseguir. Melee é
+		# static cast (castWalk=false) e WalkToward chama Skill.Stopped — na
+		# borda de range o flicker de wander cancelava a esmagadora maioria dos
+		# casts em real-time (probe: 995 casts / 1 kill; sims comprimidos não
+		# sofrem porque o cast resolve em ~1,5 frames no timeScale 20). Deixa o
+		# swing resolver e aproxima no tick seguinte; o failsafe STUCK cobre
+		# casos patológicos.
+		if not SkillCommons.IsCasting(agent) and not SkillCommons.HasAnyActionInProgress(agent):
+			agent.WalkToward(target.position)
 	else:
 		# SOM-IDLE D1: chama Cast só quando um cast real pode começar
 		# (predicados do próprio motor). Sem isso cada tick empilha um timer

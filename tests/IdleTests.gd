@@ -386,16 +386,23 @@ func _SimRun(charID : int, runIdx : int, simSeconds : int, timeScale : float, zo
 			loadoutID, pskill.modifiers.Get(CellCommons.Modifier.Attack) if pskill else -1,
 			pskill.skillRange if pskill else -1])
 		var diagInst : WorldInstance = IdlePolicyService.GetFarmInstance(zoneID)
-		var shown : int = 0
 		if diagInst:
 			print("MATCHUP instance mobs: %d" % diagInst.mobs.size())
+			# SOM-IDLE: censo completo por (tipo, nível) — o mapa da zona carrega
+			# TODOS os seus spawn groups na instância; se houver mob de nível
+			# alto no mesmo mapa, o alvo "mais próximo" pode travar o farmer.
+			var census : Dictionary = {}
+			var censusLevels : Dictionary = {}
 			for mob in diagInst.mobs:
-				if mob and is_instance_valid(mob) and shown < 5:
+				if mob and is_instance_valid(mob):
 					var mobName : String = mob.data._name if mob.data else "?"
-					print("MATCHUP mob %s L%d hp %d def %d dodge %.3f" % [
-						mobName, mob.stat.level, mob.stat.current.maxHealth,
-						mob.stat.current.defense, mob.stat.current.dodgeRate])
-					shown += 1
+					var key : String = "%s L%d" % [mobName, mob.stat.level]
+					census[key] = int(census.get(key, 0)) + 1
+					if not censusLevels.has(key):
+						censusLevels[key] = [int(mob.stat.current.maxHealth), int(mob.stat.current.defense)]
+			for key in census.keys():
+				var stats : Array = censusLevels[key]
+				print("MATCHUP census %s x%d hp %d def %d" % [key, census[key], stats[0], stats[1]])
 
 	# Let the deferred add_child land, then give mobs time to populate (fresh
 	# instances are created on first use — _map_loaded runs deferred on nav sync)
