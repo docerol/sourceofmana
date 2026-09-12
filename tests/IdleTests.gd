@@ -200,6 +200,15 @@ func SuiteSettleGolden(sql : SQLService, economy : EconomyService, charID : int,
 	CheckEq(int(report.get("drops", {}).get(FarmZoneData.GetDropForRoll(5, charID + 5), 0)), expectedDrop, "drop count golden")
 	CheckEq(int(report["chests"]), 3, "chests = min(3, floor(12/4))")
 
+	# SOM-IDLE: chaves de boss acumulam offline com o mesmo ppm do drop ao vivo.
+	var expectedKills : float = float(zone5.parKillsPerHour) * h * eff * OfflineSettle.OfflineFactor
+	var keyExp : float = float(BossService.KeyDropPPM) * expectedKills / 1000000.0
+	var expectedKeys : int = floori(keyExp)
+	if keyExp - float(expectedKeys) >= 0.5:
+		expectedKeys += 1
+	CheckEq(int(report.get("boss_keys", -1)), expectedKeys, "offline boss_keys golden (z5/12h/0.8)")
+	CheckEq(int(sql.GetCharacterBossKeys(charID)), expectedKeys, "offline boss_keys persisted to character")
+
 	# DB state: level recomputed via curve, gold credited net of tax
 	var stat : Dictionary = sql.GetStat(charID)
 	var newLevel : int = int(stat["level"])
@@ -243,8 +252,11 @@ func SuiteSettleIdempotency(sql : SQLService, charID : int, expectedLedgerRows :
 	var xpAfter : Variant = statAfter["experience"]
 	Check(xpAfter == xpBefore, "experience unchanged on re-settle")
 
-	var ledgerCount : int = int(sql.QueryBindings("SELECT COUNT(*) AS c FROM ledger_transaction WHERE char_id = ?;", [charID])[0]["c"])
-	CheckEq(ledgerCount, expectedLedgerRows, "no duplicate ledger rows after re-settle")
+	# Gold + xp are the value-moving rows the settle idempotency is about; a
+	# re-settle must not duplicate them. (boss_key rows are also idempotent via
+	# the anchor guard but tracked separately by the golden boss_keys check.)
+	var ledgerCount : int = int(sql.QueryBindings("SELECT COUNT(*) AS c FROM ledger_transaction WHERE char_id = ? AND kind IN ('gold','xp');", [charID])[0]["c"])
+	CheckEq(ledgerCount, expectedLedgerRows, "no duplicate gold/xp ledger rows after re-settle")
 
 	# Same-millisecond double settle across fresh anchors
 	var now : int = SQLCommons.Timestamp()
@@ -696,6 +708,102 @@ func SuiteFarmSpawnTable() -> void:
 		respawns.append(FarmZoneData.GetFarmRespawnDelay(zoneID))
 	Check(respawns[0] >= respawns[1] and respawns[1] >= respawns[2] and respawns[2] >= respawns[3] and respawns[3] >= respawns[4], "respawn non-increasing with tier")
 	Check(respawns[4] >= FarmZoneData.FarmRespawnMinSeconds, "respawn floor respected (%.1fs)" % respawns[4])
+
+# SOM-IDLE: boss-key ladder — matemática pura (sem DB/agent). Drop, escala,
+# sim de duelo determinística e curva de recompensa.
+func SuiteBossService() -> void:
+	print("[suite] boss service (pure)")
+	# Drop roll (threshold = ppm/1e6): rng below → chave, na borda/acima → não.
+	var keyP : float = float(BossService.KeyDropPPM) / 1000000.0
+	Check(BossService.RollsKeyDrop(0.0), "key drop: rng 0 rolls a key")
+	Check(BossService.RollsKeyDrop(keyP * 0.5), "key drop: rng under PPM rolls")
+	Check(not BossService.RollsKeyDrop(keyP), "key drop: rng at PPM boundary misses")
+	Check(not BossService.RollsKeyDrop(0.5), "key drop: rng 0.5 misses")
+	# Escala: boss no nível do char com piso por índice; stats crescem com nível.
+	CheckEq(BossService.GetBossLevel(1, 0), BossService.GetBossFloorLevel(0), "boss level honors floor")
+	CheckEq(BossService.GetBossLevel(50, 0), 50, "boss scales to player level")
+	Check(BossService.GetBossMaxHealth(10) > BossService.GetBossMaxHealth(5), "boss HP scales with level")
+	Check(BossService.GetBossAttack(10) > BossService.GetBossAttack(5), "boss atk scales with level")
+	Check(BossService.GetBossDefense(10) > BossService.GetBossDefense(5), "boss def scales with level")
+	# Sim: um char fraco perde, um char forte ganha; win é consistente com TTK.
+	var weak : Dictionary = {"attack" = 1, "defense" = 0, "maxHealth" = 20, "cycle" = 1.2}
+	var weakDuel : Dictionary = BossService.Resolve(weak, 10)
+	Check(not bool(weakDuel["win"]), "sim: weak char loses to boss")
+	var strong : Dictionary = {"attack" = 99999, "defense" = 99999, "maxHealth" = 9999999, "cycle" = 1.2}
+	var strongDuel : Dictionary = BossService.Resolve(strong, 10)
+	Check(bool(strongDuel["win"]), "sim: strong char beats boss")
+	Check(bool(weakDuel["win"]) == bool(float(weakDuel["playerTTK"]) <= float(weakDuel["bossTTK"])), "sim: win == playerTTK<=bossTTK")
+	# Recompensa: boss vale N kills de farm; gold = xp/8 × bônus.
+	CheckEq(BossService.VictoryXp(1000), 1000 * BossService.BossXpKills, "boss victory xp = xpPerKill × kills")
+	CheckEq(BossService.ConsolationXp(1000), 1000 * BossService.ConsolationXpKills, "boss consolation xp")
+	CheckEq(BossService.VictoryGold(1000), roundi(float(BossService.VictoryXp(1000)) / float(FarmZoneData.GoldPerKillDiv) * BossService.BossGoldBonus), "boss victory gold")
+	CheckEq(BossService.GetBossCount(), FarmZoneData.BossMapNames.size(), "boss roster matches boss map names")
+
+# SOM-IDLE: boss-key ladder — fluxo DB + challenge end-to-end (agente real).
+func SuiteBossLadder(sql : SQLService, economy : EconomyService) -> void:
+	print("[suite] boss ladder (DB + challenge)")
+	var charID : int = CreateFixture(sql, "idle_boss_account", "IdleBossTester")
+	if not Check(charID != 0, "boss fixture created"):
+		return
+	var accountID : int = sql.GetAccountIDForCharacter(charID)
+	# Grant / spend / clamp (character column is the source of truth).
+	CheckEq(economy.GrantBossKey(charID, 3, "test"), 3, "grant 3 keys → balance 3")
+	CheckEq(sql.GetCharacterBossKeys(charID), 3, "keys persisted on character")
+	Check(economy.SpendBossKey(charID, 1, "test"), "spend 1 key ok")
+	CheckEq(sql.GetCharacterBossKeys(charID), 2, "keys decremented")
+	Check(not economy.SpendBossKey(charID, 99, "test"), "cannot overspend keys")
+	CheckEq(sql.GetCharacterBossKeys(charID), 2, "overspend left balance untouched")
+	# State shape.
+	var st : Dictionary = economy.GetBossState(charID, 1)
+	CheckEq(int(st.get("keys", -1)), 2, "state reports keys")
+	CheckEq(int(st.get("count", -1)), BossService.GetBossCount(), "state reports ladder count")
+	var bosses : Array = st.get("bosses", [])
+	CheckEq(bosses.size(), BossService.GetBossCount(), "state lists every boss")
+	if not bosses.is_empty():
+		Check(bool(bosses[0].get("next", false)), "first un-beaten boss is the next target")
+		Check(bool(bosses[bosses.size() - 1].get("next", false)) == false or bosses.size() == 1, "last boss not next when beaten<last")
+
+	# Live challenge: precisa de um PlayerAgent (stats reais para a sim).
+	var agent : PlayerAgent = await _SpawnSimAgent(charID, 970, 1)
+	if not Check(agent != null, "boss challenge agent spawned"):
+		sql.db.delete_rows("character", "nickname = 'IdleBossTester'")
+		sql.db.delete_rows("account", "username = 'idle_boss_account'")
+		return
+	sql.SetCharacterFarmZone(charID, 1)
+	# Derrota realista: char L1 nu perde para o boss L5 → consolação, chave gasta.
+	var xpBefore : int = agent.stat.experience
+	var lose : Dictionary = economy.ChallengeBoss(charID, agent)
+	Check(bool(lose.get("ok", false)), "challenge accepted (has key)")
+	CheckEq(int(lose.get("win", -1)), 0, "naked L1 loses first boss")
+	Check(int(lose.get("xp", 0)) > 0, "defeat grants consolation xp")
+	Check(sql.GetCharacterBossKeys(charID) == 1, "defeat consumed a key")
+	CheckEq(sql.GetCharacterBossesBeaten(charID), 0, "loss does not advance ladder")
+	Check(agent.stat.experience > xpBefore, "agent xp increased by consolation")
+	# Vitória forçada: pump de stat.current (lido pelo snapshot) → win + avanço.
+	agent.stat.current.attack = 999999
+	agent.stat.current.defense = 999999
+	agent.stat.current.maxHealth = 99999999
+	var win : Dictionary = economy.ChallengeBoss(charID, agent)
+	Check(bool(win.get("ok", false)), "second challenge accepted")
+	Check(bool(win.get("win", false)), "overpowered char beats boss")
+	CheckEq(sql.GetCharacterBossesBeaten(charID), 1, "victory advances ladder")
+	Check(int(win.get("chests", -1)) >= 1, "victory grants chest(s)")
+	CheckEq(sql.GetCharacterBossKeys(charID), 0, "key spent on the win")
+	# Sem chaves → bloqueio.
+	var noKey : Dictionary = economy.ChallengeBoss(charID, agent)
+	Check(not bool(noKey.get("ok", false)), "no-key challenge rejected")
+	CheckEq(0 if str(noKey.get("reason", "")) == "no_key" else 1, 0, "no-key reason")
+	# Escada completa.
+	sql.SetCharacterBossesBeaten(charID, BossService.GetBossCount())
+	var done : Dictionary = economy.ChallengeBoss(charID, agent)
+	Check(not bool(done.get("ok", false)), "ladder-complete challenge rejected")
+	CheckEq(0 if str(done.get("reason", "")) == "ladder_complete" else 1, 0, "ladder-complete reason")
+
+	if is_instance_valid(agent):
+		IdlePolicyService.StopIdleSession(agent)
+		WorldAgent.RemoveAgent(agent)
+	sql.db.delete_rows("character", "nickname = 'IdleBossTester'")
+	sql.db.delete_rows("account", "username = 'idle_boss_account'")
 
 # VIP window multiplies the settle faucet; expired/absent VIP is a no-op
 func SuiteVIPMods(sql : SQLService, charID : int, accountID : int) -> void:

@@ -34,6 +34,7 @@ class SettleReport:
 	var goldTaxed : int = 0
 	var drops : Dictionary[int, int] = {}
 	var chests : int = 0
+	var bossKeysEarned : int = 0
 	var lastSettledAt : int = 0
 	var mods : float = 1.0
 
@@ -52,6 +53,7 @@ class SettleReport:
 			"gold_taxed": goldTaxed,
 			"drops": drops,
 			"chests": chests,
+			"boss_keys": bossKeysEarned,
 			"last_settled_at": lastSettledAt,
 			"mods": mods,
 		}
@@ -172,6 +174,16 @@ static func _ApplyFormula(sql : SQLService, report : SettleReport):
 
 	report.chests = mini(floori(h / float(ChestHoursPerChest)), MaxChests)
 
+	# SOM-IDLE: chaves de boss também acumulam offline (idle-first) — kills
+	# equivalentes da sessão × KeyDropPPM, com o mesmo carry determinístico de
+	# fração (>=0.5) usado nos drops de item. Sem RNG no caminho golden.
+	var equivKills : float = float(zone.parKillsPerHour) * h * eff * OfflineFactor * report.mods
+	var keyExpected : float = float(BossService.KeyDropPPM) * equivKills / 1000000.0
+	var keyCount : int = floori(keyExpected)
+	if keyExpected - float(keyCount) >= 0.5:
+		keyCount += 1
+	report.bossKeysEarned = maxi(0, keyCount)
+
 # ------------------------------------------------------------------ apply (transactional)
 
 static func _Apply(sql : SQLService, report : SettleReport) -> bool:
@@ -225,6 +237,16 @@ static func _Apply(sql : SQLService, report : SettleReport) -> bool:
 		for i in report.chests:
 			if not sqlNode.AddChestInstance(report.charID, 0, "settle"):
 				return false
+
+		# 5b) SOM-IDLE: boss keys from offline farming (character column + ledger
+		# mirror; the ledger kind is 'boss_key' so it never collides with the
+		# gold/xp row-count assertions in the settle golden).
+		if report.bossKeysEarned > 0:
+			if sqlNode.AddCharacterBossKeys(report.charID, report.bossKeysEarned) < 0:
+				return false
+			if economy != null:
+				if not economy.LedgerAppend(report.charID, accountID, "boss_key", report.bossKeysEarned, sqlNode.GetCharacterBossKeys(report.charID), "offline_settle"):
+					return false
 
 		# 6) anchor update
 		if not sqlNode.UpdateSettleAnchor(report.charID, report.lastSettledAt, 1.0):

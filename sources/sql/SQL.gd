@@ -502,6 +502,40 @@ func GetFormationForCharacter(charID : int) -> Dictionary:
 func SetCharacterFarmZone(charID : int, zoneID : int) -> bool:
 	return db.update_rows("character", "char_id = %d" % charID, {"farm_zone" = zoneID})
 
+# SOM-IDLE: boss-key ladder (migration 019). boss_keys é coluna do character
+# (progressão por char, como farm_zone). AddClamped nunca deixa ir abaixo de 0,
+# então um gasto nunca fica negativo numa corrida de RPC.
+# delta<0 = gastar. Retorna o saldo novo (>=0) ou -1 se o char não existe.
+# NOTA: usa db.* CRU (select_rows/update_rows), não QueryBindings — estes
+# métodos são chamados de dentro de SQL.Transaction() (GrantBossKey/offline
+# settle), onde QueryBindings trava o queryMutex e corrompe a transação.
+func GetCharacterBossKeys(charID : int) -> int:
+	var rows : Array = db.select_rows("character", "char_id = %d" % charID, ["boss_keys"])
+	if rows.is_empty():
+		return -1
+	var value : Variant = rows[0].get("boss_keys", 0)
+	return 0 if value == null else int(value)
+
+func AddCharacterBossKeys(charID : int, delta : int) -> int:
+	var current : int = GetCharacterBossKeys(charID)
+	if current < 0:
+		return -1
+	var next : int = maxi(0, current + delta)
+	# UpdateRowsRaw: db.update_rows faz BEGIN/COMMIT implícitos e não pode rodar
+	# dentro de um Transaction() (GrantBossKey/SpendBossKey/offline settle).
+	UpdateRowsRaw("character", "char_id = %d" % charID, {"boss_keys" = next})
+	return next
+
+func GetCharacterBossesBeaten(charID : int) -> int:
+	var rows : Array = db.select_rows("character", "char_id = %d" % charID, ["bosses_beaten"])
+	if rows.is_empty():
+		return 0
+	var value : Variant = rows[0].get("bosses_beaten", 0)
+	return 0 if value == null else int(value)
+
+func SetCharacterBossesBeaten(charID : int, count : int) -> bool:
+	return db.update_rows("character", "char_id = %d" % charID, {"bosses_beaten" = maxi(0, count)})
+
 # SOM-IDLE: F2 — persist live session efficiency on disconnect (NetServer hook)
 func PersistSessionEfficiency(charID : int, efficiency : float) -> bool:
 	return db.update_rows("character", "char_id = %d" % charID, {"session_efficiency" = efficiency})

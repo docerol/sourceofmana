@@ -79,6 +79,7 @@ func _run_tests():
 		# SOM-IDLE: F3 suites (tiers, spawn table, VIP, leaderboard, slots)
 		suites.SuiteItemTiers()
 		suites.SuiteFarmSpawnTable()
+		suites.SuiteBossService()
 		var f3char : int = suites.CreateFixture(sql, "idle_f3_account", "IdleF3Tester")
 		if suites.Check(f3char != 0, "F3 fixture created (charID %d)" % f3char):
 			suites.SuiteVIPMods(sql, f3char, sql.GetAccountIDForCharacter(f3char))
@@ -119,6 +120,7 @@ func _run_tests():
 		# SOM-IDLE: D1 pacing (harness fast; real-time probe ~5min, binding gate)
 		suites.SuiteFaucetHarness(sql)
 		await suites.SuiteOnboarding(sql)
+		await suites.SuiteBossLadder(sql, economy)
 		await suites.SuiteIdlePolicyRealTime(sql)
 	else:
 		print("FATAL: DB not initialized — DB-backed suites skipped")

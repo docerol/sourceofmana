@@ -9,6 +9,7 @@ const LedgerKindGold : String = "gold"
 const LedgerKindXP : String = "xp"
 const LedgerKindItem : String = "item"
 const LedgerKindGems : String = "gems"
+const LedgerKindBossKey : String = "boss_key"
 
 var settleMutex : Mutex						= Mutex.new()
 
@@ -103,6 +104,137 @@ func AddGems(accountID : int, amount : int, reason : String) -> bool:
 		ok = true
 	settleMutex.unlock()
 	return ok
+
+# ------------------------------------------------------------------ boss keys (character column + ledger mirror)
+# SOM-IDLE: boss-key ladder. boss_keys vive no character (progressão por char,
+# como farm_zone); o ledger só espelha os fluxos para auditoria. GrantBossKey é o
+# único caminho de drop; SpendBossKey retorna false se não houver chave (nunca
+# negativa). Retorna o saldo novo (>=0) ou -1 em falha.
+func GrantBossKey(charID : int, amount : int, reason : String) -> int:
+	if amount == 0:
+		return Launcher.SQL.GetCharacterBossKeys(charID)
+	var applied : bool = false
+	settleMutex.lock()
+	# GDScript closures capture by VALUE: we cannot read `result` back out of the
+	# transaction closure, so we re-query the (now committed) column after commit.
+	if Launcher.SQL.Transaction(func() -> bool:
+		var next : int = Launcher.SQL.AddCharacterBossKeys(charID, amount)
+		if next < 0:
+			return false
+		var acct : int = _AccountIDForCharacterRaw(charID)
+		return _LedgerAppendLocked(acct, charID, LedgerKindBossKey, amount, next, reason)):
+		applied = true
+	settleMutex.unlock()
+	return Launcher.SQL.GetCharacterBossKeys(charID) if applied else -1
+
+func SpendBossKey(charID : int, amount : int, reason : String) -> bool:
+	if amount <= 0:
+		return false
+	settleMutex.lock()
+	var ok : bool = false
+	if Launcher.SQL.Transaction(func() -> bool:
+		var current : int = Launcher.SQL.GetCharacterBossKeys(charID)
+		if current < amount:
+			return false
+		var next : int = current - amount
+		if Launcher.SQL.AddCharacterBossKeys(charID, -amount) == -1:
+			return false
+		var acct : int = _AccountIDForCharacterRaw(charID)
+		return _LedgerAppendLocked(acct, charID, LedgerKindBossKey, -amount, next, reason)):
+		ok = true
+	settleMutex.unlock()
+	return ok
+
+# ------------------------------------------------------------------ boss ladder (state + challenge)
+# SOM-IDLE: a escada é sequencial — o próximo boss desafiável é sempre o índice
+# `beaten`. O boss escala ao nível do char. A resolução é a sim de duelo do
+# BossService (determinística); aqui só validamos, gastamos a chave, entregamos
+# xp/gold/chance de drop e persistimos o progresso.
+
+func GetBossState(charID : int, playerLevel : int) -> Dictionary:
+	var beaten : int = Launcher.SQL.GetCharacterBossesBeaten(charID)
+	var bosses : Array = []
+	for i in BossService.GetBossCount():
+		var bl : int = BossService.GetBossLevel(playerLevel, i)
+		bosses.append({
+			"index" = i,
+			"name" = BossService.GetBossName(i),
+			"level" = bl,
+			"hp" = BossService.GetBossMaxHealth(bl),
+			"beaten" = i < beaten,
+			"next" = i == beaten,
+		})
+	return {
+		"keys" = Launcher.SQL.GetCharacterBossKeys(charID),
+		"beaten" = beaten,
+		"count" = BossService.GetBossCount(),
+		"level" = playerLevel,
+		"bosses" = bosses,
+	}
+
+# Retorna o resultado do desafio (ok=false + reason em falha de validação).
+# `player` é o PlayerAgent online (precisamos das stats reais para a sim e para
+# entregar xp/gold no agente).
+func ChallengeBoss(charID : int, player) -> Dictionary:
+	if player == null or not is_instance_valid(player) or player.stat == null:
+		return {"ok" = false, "reason" = "not_online"}
+
+	var index : int = Launcher.SQL.GetCharacterBossesBeaten(charID)
+	if index >= BossService.GetBossCount():
+		return {"ok" = false, "reason" = "ladder_complete"}
+
+	# A escada é sequencial: o índice é fixo (próximo não-vencido). Se o cliente
+	# quiser insistir num boss já vencido, nada a fazer.
+	if Launcher.SQL.GetCharacterBossKeys(charID) < 1:
+		return {"ok" = false, "reason" = "no_key"}
+
+	if not SpendBossKey(charID, 1, "boss_challenge"):
+		return {"ok" = false, "reason" = "spend_failed"}
+
+	var bossLevel : int = BossService.GetBossLevel(player.stat.level, index)
+	var snapshot : Dictionary = BossService.PlayerFightSnapshot(player)
+	var duel : Dictionary = BossService.Resolve(snapshot, bossLevel)
+	var win : bool = bool(duel.get("win", false))
+
+	# referência de xp = zona de farm atual do char
+	var charRow : Dictionary = Launcher.SQL.GetCharacter(charID)
+	var zoneID : int = int(charRow.get("farm_zone", 1) if charRow.get("farm_zone", 1) != null else 1)
+	var zone : FarmZoneData = FarmZoneData.GetZone(zoneID)
+	var zoneXp : int = zone.xpPerKill if zone != null else FarmZoneData.XpBasePerKill
+	var accountID : int = Launcher.SQL.GetAccountIDForCharacter(charID)
+	var vipActive : bool = Launcher.SQL.GetVIPUntil(accountID) > SQLCommons.Timestamp()
+	var vipMult : float = OfflineSettle.VIPModFactor if vipActive else 1.0
+	var newbie : bool = player.stat.level < FarmZoneData.NewbieBoostMaxLevel
+	var nb : float = float(FarmZoneData.NewbieBoostFactor) if newbie else 1.0
+
+	var baseXp : int = BossService.VictoryXp(zoneXp) if win else BossService.ConsolationXp(zoneXp)
+	var xpGrant : int = maxi(1, roundi(float(baseXp) * nb * vipMult))
+	player.stat.AddExperience(xpGrant, false)
+	var goldGrant : int = 0
+	if win:
+		goldGrant = roundi(float(BossService.VictoryGold(zoneXp)) * nb * vipMult)
+		player.stat.AddGP(goldGrant, false)
+
+	var chestsGranted : int = 0
+	if win:
+		for i in BossService.BossChestReward:
+			if Launcher.SQL.AddChestInstance(charID, FarmZoneData.DefaultDropItemHash, "boss"):
+				chestsGranted += 1
+		Launcher.SQL.SetCharacterBossesBeaten(charID, index + 1)
+
+	return {
+		"ok" = true,
+		"win" = win,
+		"index" = index,
+		"boss" = BossService.GetBossName(index),
+		"level" = bossLevel,
+		"duration" = roundf(float(duel.get("duration", 0.0))),
+		"xp" = xpGrant,
+		"gold" = goldGrant,
+		"chests" = chestsGranted,
+		"keys" = Launcher.SQL.GetCharacterBossKeys(charID),
+		"beaten" = Launcher.SQL.GetCharacterBossesBeaten(charID),
+	}
 
 # ------------------------------------------------------------------ F4: real implementations
 

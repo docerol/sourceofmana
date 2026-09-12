@@ -11,6 +11,10 @@ static var LastChestOpened : Dictionary = {}
 static var LastSeasonBoards : Dictionary = {}
 static var LastLeaderboard : Array = []
 
+# SOM-IDLE: estado do ladder de bosses + último resultado de desafio (janela Boss).
+static var LastBossState : Dictionary = {}
+static var LastBossResult : Dictionary = {}
+
 #
 func WarpPlayer(mapID : int, playerPos : Vector2, _peerID : int):
 	if Launcher.Map:
@@ -410,6 +414,17 @@ func SeasonBoards(data : Dictionary, _peerID : int):
 	LastSeasonBoards = data
 	if Launcher.GUI and Launcher.GUI.leaderboardWindow and Launcher.GUI.leaderboardWindow.is_visible():
 		Launcher.GUI.leaderboardWindow.ShowSeason(data)
+
+# SOM-IDLE: respostas do ladder de bosses.
+func BossState(state : Dictionary, _peerID : int):
+	LastBossState = state
+	if Launcher.GUI and Launcher.GUI.bossWindow and Launcher.GUI.bossWindow.is_visible():
+		Launcher.GUI.bossWindow.ShowState(state)
+
+func BossResult(result : Dictionary, _peerID : int):
+	LastBossResult = result
+	if Launcher.GUI and Launcher.GUI.bossWindow and Launcher.GUI.bossWindow.is_visible():
+		Launcher.GUI.bossWindow.ShowResult(result)
 
 func RefreshOnlineList(players : PackedStringArray, _peerID : int):
 	if Launcher.GUI:

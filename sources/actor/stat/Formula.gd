@@ -161,6 +161,11 @@ static func ApplyXp(agent : AIAgent):
 				if damageRatio > 0.5:
 					var zoneGold : int = maxi(1, roundi(float(zone.goldPerKill) * damageRatio))
 					entry.attacker.stat.AddGP(zoneGold, false)
+					# SOM-IDLE: boss-key drop — mobs de farm dropam chaves (raras)
+					# que abrem a escada de bosses. Só com o EconomyService no ar
+					# (servidor); sims puras sem Launcher.Economy só contam kills.
+					if Launcher.Economy != null and BossService.RollsKeyDrop(randf()):
+						Launcher.Economy.GrantBossKey(entry.attacker.GetCharacterID(), 1, "farm_drop")
 			else:
 				var bonusScaled : int = int(bonus * damageRatio)
 				entry.attacker.stat.AddExperience(bonusScaled, false)

@@ -380,6 +380,27 @@ func PurchaseVIP(tier : int, peerID : int):
 func GetSeasonBoards(peerID : int):
 	Network.SeasonBoards(Launcher.Economy.GetSeasonBoardsState(10), peerID)
 
+# SOM-IDLE: boss-key ladder handlers.
+func GetBossState(peerID : int):
+	var charID : int = Peers.GetCharacter(peerID)
+	if charID == NetworkCommons.PeerUnknownID:
+		Network.BossState({}, peerID)
+		return
+	var player : PlayerAgent = Peers.GetAgent(peerID)
+	var level : int = player.stat.level if player != null else 1
+	Network.BossState(Launcher.Economy.GetBossState(charID, level), peerID)
+
+func ChallengeBoss(peerID : int):
+	var charID : int = Peers.GetCharacter(peerID)
+	if charID == NetworkCommons.PeerUnknownID:
+		Network.BossResult({"ok" = false, "reason" = "not_logged_in"}, peerID)
+		return
+	var player : PlayerAgent = Peers.GetAgent(peerID)
+	var result : Dictionary = Launcher.Economy.ChallengeBoss(charID, player)
+	Network.BossResult(result, peerID)
+	if bool(result.get("ok", false)):
+		Network.BossState(Launcher.Economy.GetBossState(charID, player.stat.level), peerID)
+
 func CharacterListing(peerID : int):
 	var err : NetworkCommons.CharacterError = NetworkCommons.CharacterError.ERR_OK
 	var accountID : int = Peers.GetAccount(peerID)

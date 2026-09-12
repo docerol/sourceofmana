@@ -449,6 +449,25 @@ func GetSeasonBoards(peerID : int = NetworkCommons.PeerAuthorityID):
 func SeasonBoards(data : Dictionary, peerID : int = NetworkCommons.PeerOfflineID):
 	CallClient("SeasonBoards", [data], peerID)
 
+# SOM-IDLE: boss-key ladder (janela Boss). ChallengeBoss devolve BossResult e
+# depois BossState fresco (chaves/progresso mudam a cada tentativa).
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func GetBossState(peerID : int = NetworkCommons.PeerAuthorityID):
+	CallServer("GetBossState", [], peerID, NetworkCommons.DelayConfig)
+
+@rpc("authority", "call_remote", "reliable", EChannel.ACTION)
+func BossState(state : Dictionary, peerID : int = NetworkCommons.PeerOfflineID):
+	CallClient("BossState", [state], peerID)
+
+@rpc("any_peer", "call_remote", "reliable", EChannel.ACTION)
+func ChallengeBoss(peerID : int = NetworkCommons.PeerAuthorityID):
+	# Sem burst: o desafio gasta uma chave e resolve a luta numa tacada.
+	CallServer("ChallengeBoss", [], peerID, 1500)
+
+@rpc("authority", "call_remote", "reliable", EChannel.ACTION)
+func BossResult(result : Dictionary, peerID : int = NetworkCommons.PeerOfflineID):
+	CallClient("BossResult", [result], peerID)
+
 # Inventory
 @rpc("authority", "call_remote", "reliable", EChannel.ENTITY)
 func ItemAdded(itemID : int, customfield : StringName, count : int, peerID : int = NetworkCommons.PeerOfflineID):

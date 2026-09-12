@@ -1,0 +1,44 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Theme" path="res://data/themes/DefaultTheme.tres" id="1"]
+[ext_resource type="Script" path="res://sources/gui/Boss.gd" id="2"]
+[ext_resource type="PackedScene" path="res://presets/gui/TitleBar.tscn" id="3"]
+
+[node name="Boss" type="PanelContainer"]
+custom_minimum_size = Vector2(400, 400)
+offset_right = 400.0
+offset_bottom = 400.0
+theme = ExtResource("1")
+theme_type_variation = &"WindowPanel"
+script = ExtResource("2")
+
+[node name="Layout" type="VBoxContainer" parent="."]
+layout_mode = 2
+
+[node name="TitleBar" parent="Layout" instance=ExtResource("3")]
+layout_mode = 2
+size_flags_vertical = 0
+titleText = "Bosses"
+
+[node name="Keys" type="Label" parent="Layout"]
+layout_mode = 2
+text = "Boss keys: 0    •    Bosses defeated: 0/0"
+
+[node name="Result" type="Label" parent="Layout"]
+layout_mode = 2
+text = "Farm mobs drop boss keys. Spend one to challenge a boss."
+autowrap_mode = 3
+
+[node name="BossScroll" type="ScrollContainer" parent="Layout"]
+custom_minimum_size = Vector2(0, 180)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="BossList" type="VBoxContainer" parent="Layout/BossScroll"]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="Hint" type="Label" parent="Layout"]
+layout_mode = 2
+text = "Each boss scales to your level — gear decides the outcome."
+autowrap_mode = 3
